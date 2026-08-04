@@ -1,0 +1,373 @@
+import { Platform, PostStatus } from "@prisma/client";
+import { z } from "zod";
+
+import { assertCan } from "@/lib/auth/permissions";
+import type { Session } from "@/lib/auth/session";
+import { db } from "@/lib/db";
+import { generateSchema, type GenerationType } from "@/lib/validators/ai";
+import { CHARACTER_LIMITS } from "@/lib/validators/platform-data";
+import { getBrandVoice } from "@/modules/brandvoice/service";
+import { createIdea, listIdeas } from "@/modules/ideas/service";
+import { createPost, updatePost } from "@/modules/posts/service";
+import { systemPrompt, userPrompt } from "./prompts";
+import {
+  chat as providerChat,
+  complete,
+  isModelConfigured,
+  type ProviderMessage,
+  type ProviderSource,
+  type ToolSpec,
+} from "./provider";
+
+/**
+ * The AI orchestrator (ARCHITECTURE.md §9).
+ *
+ * Single entry point for every AI feature in the product. Tool calls map to the
+ * service layer, never to Prisma — that is what keeps "the AI path is the real
+ * path" (§2.3) true rather than aspirational.
+ */
+
+export { isModelConfigured };
+
+export type GenerationResult = {
+  id: string;
+  output: string;
+  source: ProviderSource;
+};
+
+/** Types whose output is several posts, options or beats — not one post. */
+const MULTI_PART_TYPES = new Set<GenerationType>([
+  "thread",
+  "hook",
+  "idea",
+  "title",
+  "thumbnail",
+  "script",
+  "repurpose",
+  "chat",
+]);
+
+async function context(session: Session, platform: Platform | null) {
+  const voice = await getBrandVoice(session);
+  return systemPrompt({ voice, platform, orgName: session.orgName });
+}
+
+/** Every Studio AI feature funnels through here — feature = prompt + type. */
+export async function generate(
+  session: Session,
+  input: z.input<typeof generateSchema>
+): Promise<GenerationResult> {
+  assertCan(session.role, "ai.generate");
+  const data = generateSchema.parse(input);
+
+  const system = await context(session, data.studio);
+
+  // Multi-part formats legitimately exceed a single post's limit; single-post
+  // formats do not, and handing back an over-limit draft the composer will
+  // reject is worse than no draft at all.
+  const singlePost = !MULTI_PART_TYPES.has(data.type);
+
+  const result = await complete({
+    system,
+    messages: [
+      {
+        role: "user",
+        content: userPrompt({
+          type: data.type,
+          input: data.input,
+          context: data.context,
+        }),
+      },
+    ],
+    maxChars: singlePost ? CHARACTER_LIMITS[data.studio] : undefined,
+  });
+
+  // Persisted as an AIGeneration row — audit trail and the source for the
+  // "recent generations" surfaces (§9).
+  const row = await db.aIGeneration.create({
+    data: {
+      orgId: session.orgId,
+      userId: session.userId,
+      studio: data.studio,
+      type: data.type,
+      input: data.input,
+      output: result.text,
+    },
+  });
+
+  return { id: row.id, output: result.text, source: result.source };
+}
+
+export async function listGenerations(
+  session: Session,
+  filters: { studio?: Platform; type?: GenerationType; take?: number } = {}
+) {
+  return db.aIGeneration.findMany({
+    where: {
+      orgId: session.orgId,
+      ...(filters.studio ? { studio: filters.studio } : {}),
+      ...(filters.type ? { type: filters.type } : {}),
+    },
+    include: { user: true },
+    orderBy: { createdAt: "desc" },
+    take: filters.take ?? 20,
+  });
+}
+
+/**
+ * "Repurpose this into everything" (Phase 4). One input becomes a real draft
+ * per platform — created through createPost, so they are ordinary posts that
+ * show up in the queue and the calendar like any other.
+ */
+export async function repurpose(
+  session: Session,
+  input: { input: string; platforms: Platform[] }
+) {
+  assertCan(session.role, "ai.generate");
+
+  const results = [];
+  for (const platform of input.platforms) {
+    const generated = await generate(session, {
+      studio: platform,
+      type: "repurpose",
+      input: input.input,
+    });
+
+    const post = await createPost(session, {
+      platform,
+      body: truncateForPlatform(platform, generated.output),
+      status: PostStatus.DRAFT,
+      platformData: {},
+    });
+
+    results.push({ platform, post, source: generated.source });
+  }
+
+  return results;
+}
+
+// ------------------------------------------------------------- tool calling
+
+const TOOLS: ToolSpec[] = [
+  {
+    name: "createPost",
+    description:
+      "Create a draft post in a Studio. Use when the person asks you to write and save something, not when they only want to see text. Call this once per platform.",
+    input_schema: {
+      type: "object",
+      properties: {
+        platform: {
+          type: "string",
+          enum: Object.values(Platform),
+          description: "Which Studio the post belongs to",
+        },
+        body: { type: "string", description: "The post copy itself" },
+      },
+      required: ["platform", "body"],
+    },
+  },
+  {
+    name: "scheduleContent",
+    description:
+      "Schedule an existing post for a specific time. Call this when the person asks to schedule or move something and you know the post id.",
+    input_schema: {
+      type: "object",
+      properties: {
+        postId: { type: "string" },
+        scheduledAt: {
+          type: "string",
+          description: "ISO 8601 timestamp for when it should go out",
+        },
+      },
+      required: ["postId", "scheduledAt"],
+    },
+  },
+  {
+    name: "repurposeContent",
+    description:
+      "Turn one piece of source material into a draft for several platforms at once. Prefer this over calling createPost repeatedly.",
+    input_schema: {
+      type: "object",
+      properties: {
+        input: { type: "string", description: "The source material" },
+        platforms: {
+          type: "array",
+          items: { type: "string", enum: Object.values(Platform) },
+        },
+      },
+      required: ["input", "platforms"],
+    },
+  },
+  {
+    name: "saveIdea",
+    description: "Save a content idea to the idea list for later.",
+    input_schema: {
+      type: "object",
+      properties: {
+        platform: { type: "string", enum: Object.values(Platform) },
+        content: { type: "string" },
+      },
+      required: ["platform", "content"],
+    },
+  },
+  {
+    name: "listIdeas",
+    description:
+      "Read the saved idea list. Call this when the person asks what ideas they have, or asks you to build on an existing one.",
+    input_schema: {
+      type: "object",
+      properties: {
+        platform: { type: "string", enum: Object.values(Platform) },
+      },
+      required: [],
+    },
+  },
+];
+
+export type ChatToolEffect = {
+  name: string;
+  summary: string;
+  postIds: string[];
+};
+
+export type ChatResult = {
+  text: string;
+  effects: ChatToolEffect[];
+  source: ProviderSource;
+};
+
+/**
+ * A chat turn. Runs the tool loop to completion so the caller gets a settled
+ * answer plus whatever actually changed in the database.
+ */
+export async function chat(
+  session: Session,
+  opts: { messages: ProviderMessage[]; studio: Platform | null }
+): Promise<ChatResult> {
+  assertCan(session.role, "ai.generate");
+
+  const system = await context(session, opts.studio);
+  const messages = [...opts.messages];
+  const effects: ChatToolEffect[] = [];
+
+  let source: ProviderSource = "local";
+  let text = "";
+
+  // Bounded: the assistant gets a few rounds to finish its tool work, then we
+  // return whatever it has rather than looping indefinitely.
+  for (let round = 0; round < 4; round++) {
+    const result = await providerChat({ system, messages, tools: TOOLS });
+    source = result.source;
+    text = result.text || text;
+
+    if (result.toolCalls.length === 0) break;
+
+    const outcomes: string[] = [];
+    for (const call of result.toolCalls) {
+      const effect = await runTool(session, call.name, call.input);
+      effects.push(effect);
+      outcomes.push(`${call.name}: ${effect.summary}`);
+    }
+
+    // Feed the outcomes back as an ordinary turn. Keeping this in plain text
+    // (rather than the tool_result block shape) means the same loop works
+    // identically against the local provider, which has no tool protocol.
+    messages.push({ role: "assistant", content: text || "(working)" });
+    messages.push({
+      role: "user",
+      content: `Results of those actions:\n${outcomes.join("\n")}\n\nTell me what you did, briefly.`,
+    });
+  }
+
+  return { text, effects, source };
+}
+
+async function runTool(
+  session: Session,
+  name: string,
+  input: Record<string, unknown>
+): Promise<ChatToolEffect> {
+  switch (name) {
+    case "createPost": {
+      const post = await createPost(session, {
+        platform: input.platform as Platform,
+        body: truncateForPlatform(
+          input.platform as Platform,
+          String(input.body ?? "")
+        ),
+        status: PostStatus.DRAFT,
+        platformData: {},
+      });
+      return {
+        name,
+        summary: `created a ${post.platform} draft`,
+        postIds: [post.id],
+      };
+    }
+
+    case "scheduleContent": {
+      const post = await updatePost(session, {
+        id: String(input.postId ?? ""),
+        status: PostStatus.SCHEDULED,
+        scheduledAt: new Date(String(input.scheduledAt ?? "")),
+      });
+      return {
+        name,
+        summary: `scheduled a ${post.platform} post`,
+        postIds: [post.id],
+      };
+    }
+
+    case "repurposeContent": {
+      const created = await repurpose(session, {
+        input: String(input.input ?? ""),
+        platforms: (input.platforms as Platform[]) ?? [],
+      });
+      return {
+        name,
+        summary: `created ${created.length} drafts`,
+        postIds: created.map((c) => c.post.id),
+      };
+    }
+
+    case "saveIdea": {
+      await createIdea(session, {
+        platform: input.platform as Platform,
+        content: String(input.content ?? ""),
+        source: "ai",
+      });
+      return { name, summary: "saved an idea", postIds: [] };
+    }
+
+    case "listIdeas": {
+      const ideas = await listIdeas(session, {
+        platform: input.platform as Platform | undefined,
+        take: 10,
+      });
+      return {
+        name,
+        summary:
+          ideas.length === 0
+            ? "no saved ideas"
+            : ideas.map((i) => `- ${i.content}`).join("\n"),
+        postIds: [],
+      };
+    }
+
+    default:
+      return { name, summary: `unknown tool ${name}`, postIds: [] };
+  }
+}
+
+function truncateForPlatform(platform: Platform, text: string) {
+  const limits: Record<Platform, number> = {
+    [Platform.X]: 280,
+    [Platform.TIKTOK]: 2200,
+    [Platform.INSTAGRAM]: 2200,
+    [Platform.FACEBOOK]: 63206,
+    [Platform.YOUTUBE]: 5000,
+  };
+  const limit = limits[platform];
+  const trimmed = text.trim();
+  return trimmed.length <= limit ? trimmed : `${trimmed.slice(0, limit - 1)}…`;
+}

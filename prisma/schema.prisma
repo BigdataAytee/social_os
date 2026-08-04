@@ -1,0 +1,370 @@
+// SocialOS — Prisma schema
+// Companion to ARCHITECTURE.md §4-5. Every business table carries orgId and is
+// always queried scoped to the authenticated user's organization (never trust
+// a client-supplied orgId — derive it from the session in the service layer).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  // Supabase serves the app through the pooler (pgbouncer), which can't run
+  // migrations. DIRECT_URL is the unpooled connection used by `prisma migrate`.
+  // For a plain local Postgres, set both to the same value. See ARCHITECTURE.md §11.
+  directUrl = env("DIRECT_URL")
+}
+
+// ============================= ENUMS =============================
+
+enum Platform {
+  X
+  TIKTOK
+  INSTAGRAM
+  FACEBOOK
+  YOUTUBE
+}
+
+enum PostStatus {
+  DRAFT
+  NEEDS_APPROVAL
+  SCHEDULED
+  QUEUED
+  PUBLISHED
+  FAILED
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+enum ConnectedAccountStatus {
+  MOCK // default in v1 — see modules/integrations
+  CONNECTED
+  ERROR
+  DISCONNECTED
+}
+
+// ======================= CORE / TENANCY =======================
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships       Membership[]
+  connectedAccounts ConnectedAccount[]
+  posts             Post[]
+  campaigns         Campaign[]
+  ideas             Idea[]
+  assets            Asset[]
+  folders           Folder[]
+  competitors       Competitor[]
+  brandVoice        BrandVoice?
+  aiGenerations     AIGeneration[]
+  notifications     Notification[]
+  tasks             Task[]
+  comments          Comment[]
+  activityLogs      ActivityLog[]
+
+  @@map("organizations")
+}
+
+model User {
+  id        String   @id // matches Supabase auth.uid()
+  email     String   @unique
+  name      String?
+  avatarUrl String?
+  createdAt DateTime @default(now())
+
+  memberships   Membership[]
+  postsAuthored Post[]         @relation("PostAuthor")
+  tasksAssigned Task[]         @relation("TaskAssignee")
+  comments      Comment[]
+  aiGenerations AIGeneration[]
+  activityLogs  ActivityLog[]
+
+  @@map("users")
+}
+
+model Membership {
+  id        String   @id @default(cuid())
+  userId    String
+  orgId     String
+  role      Role
+  createdAt DateTime @default(now())
+
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, orgId])
+  @@index([orgId])
+  @@map("memberships")
+}
+
+// =============== PLATFORM INTEGRATION (mock-first) ===============
+// See ARCHITECTURE.md §10 — status defaults to MOCK until a real adapter
+// is wired; UI never needs to know the difference.
+
+model ConnectedAccount {
+  id        String                 @id @default(cuid())
+  orgId     String
+  platform  Platform
+  handle    String
+  status    ConnectedAccountStatus @default(MOCK)
+  meta      Json? // adapter-specific display fields only — never store raw tokens here
+  createdAt DateTime               @default(now())
+
+  org       Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  snapshots AnalyticsSnapshot[]
+
+  @@unique([orgId, platform, handle])
+  @@index([orgId])
+  @@map("connected_accounts")
+}
+
+// ============================ CONTENT ============================
+
+model Post {
+  id           String     @id @default(cuid())
+  orgId        String
+  platform     Platform
+  status       PostStatus @default(DRAFT)
+  body         String
+  platformData Json       @default("{}") // thread arrays, carousel slides, thumbnails — shape varies per platform
+  campaignId   String?
+  authorId     String
+  scheduledAt  DateTime?
+  publishedAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  org      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  campaign Campaign?    @relation(fields: [campaignId], references: [id])
+  author   User         @relation("PostAuthor", fields: [authorId], references: [id])
+  comments Comment[]
+
+  @@index([orgId, platform, status])
+  @@index([orgId, scheduledAt])
+  @@map("posts")
+}
+
+model Campaign {
+  id          String    @id @default(cuid())
+  orgId       String
+  name        String
+  description String?
+  startDate   DateTime?
+  endDate     DateTime?
+  createdAt   DateTime  @default(now())
+
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  posts Post[]
+
+  @@index([orgId])
+  @@map("campaigns")
+}
+
+model Idea {
+  id        String   @id @default(cuid())
+  orgId     String
+  platform  Platform
+  content   String
+  source    String? // "manual" | "ai" | "swipe-file"
+  createdAt DateTime @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, platform])
+  @@map("ideas")
+}
+
+// ========================= ASSET LIBRARY =========================
+
+model Folder {
+  id        String   @id @default(cuid())
+  orgId     String
+  name      String
+  parentId  String?
+  createdAt DateTime @default(now())
+
+  org      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  parent   Folder?      @relation("FolderChildren", fields: [parentId], references: [id])
+  children Folder[]     @relation("FolderChildren")
+  assets   Asset[]
+
+  @@index([orgId])
+  @@map("folders")
+}
+
+model Asset {
+  id        String   @id @default(cuid())
+  orgId     String
+  type      String // "image" | "video" | "document" | "brand-asset"
+  name      String
+  url       String
+  folderId  String?
+  tags      String[]
+  createdAt DateTime @default(now())
+
+  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  folder Folder?       @relation(fields: [folderId], references: [id])
+
+  @@index([orgId, folderId])
+  @@map("assets")
+}
+
+// ======================= COMPETITIVE INTEL =======================
+
+model Competitor {
+  id        String   @id @default(cuid())
+  orgId     String
+  platform  Platform
+  handle    String
+  notes     String?
+  createdAt DateTime @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, platform, handle])
+  @@map("competitors")
+}
+
+// =========================== BRAND VOICE ===========================
+
+model BrandVoice {
+  orgId        String   @id // 1:1 with Organization, shared primary key
+  tone         String
+  audience     String
+  emojiUsage   String // "none" | "light" | "heavy"
+  ctaStyle     String
+  readingLevel String
+  avoidWords   String[]
+  terminology  Json     @default("{}")
+  updatedAt    DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("brand_voice")
+}
+
+// ============================ ANALYTICS ============================
+
+model AnalyticsSnapshot {
+  id          String   @id @default(cuid())
+  accountId   String
+  date        DateTime
+  followers   Int
+  reach       Int
+  engagement  Int
+  impressions Int
+  clicks      Int      @default(0)
+
+  account ConnectedAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, date])
+  @@index([accountId, date])
+  @@map("analytics_snapshots")
+}
+
+// =============================== AI ===============================
+
+model AIGeneration {
+  id        String   @id @default(cuid())
+  orgId     String
+  userId    String
+  studio    Platform
+  type      String // validated against lib/validators/ai.ts — see ARCHITECTURE.md §4 (deliberately not an enum)
+  input     String
+  output    String
+  createdAt DateTime @default(now())
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id])
+
+  @@index([orgId, studio, type])
+  @@map("ai_generations")
+}
+
+// ========================= TEAM WORKSPACE =========================
+
+model Task {
+  id         String     @id @default(cuid())
+  orgId      String
+  title      String
+  status     TaskStatus @default(TODO)
+  assigneeId String?
+  dueDate    DateTime?
+  entityType String? // "post" | "campaign" — lightweight polymorphic link, enforced at app layer
+  entityId   String?
+  createdAt  DateTime   @default(now())
+
+  org      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  assignee User?        @relation("TaskAssignee", fields: [assigneeId], references: [id])
+
+  @@index([orgId, status])
+  @@map("tasks")
+}
+
+model Comment {
+  id         String   @id @default(cuid())
+  orgId      String
+  userId     String
+  body       String
+  postId     String? // direct FK for the common case: comments on posts, for approvals
+  entityType String? // "campaign" | other — polymorphic fallback, enforced at app layer
+  entityId   String?
+  createdAt  DateTime @default(now())
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id])
+  post Post?        @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, postId])
+  @@map("comments")
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  orgId     String
+  userId    String // recipient — soft reference, no FK needed for a notification feed
+  type      String // "post-approved" | "mention" | "trend-alert" | ...
+  body      String
+  read      Boolean  @default(false)
+  link      String?
+  createdAt DateTime @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, userId, read])
+  @@map("notifications")
+}
+
+model ActivityLog {
+  id         String   @id @default(cuid())
+  orgId      String
+  userId     String
+  action     String // "post.published" | "member.invited" | ...
+  entityType String
+  entityId   String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id])
+
+  @@index([orgId, createdAt])
+  @@map("activity_logs")
+}
