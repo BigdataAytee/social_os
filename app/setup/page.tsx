@@ -14,31 +14,28 @@ type Step = { title: string; code: string; detail: string };
 /** Running locally: the app reads .env from disk. */
 const LOCAL_STEPS: Step[] = [
   {
-    title: "Copy the env template",
-    code: "cp .env.example .env",
-    detail: "Everything the app needs is listed there — see ARCHITECTURE.md §11.",
-  },
-  {
-    title: "Point it at Postgres",
-    code: 'DATABASE_URL="postgresql://…"\nDIRECT_URL="postgresql://…"',
+    title: "Create a Supabase project",
+    code: "supabase.com/dashboard \u2192 New project",
     detail:
-      "On Supabase these are the pooled and direct connection strings. For a local Postgres, set both to the same value.",
+      "One signup covers both things this app needs: the Postgres database and the auth keys.",
   },
   {
-    title: "Add your Supabase Auth keys",
-    code: 'NEXT_PUBLIC_SUPABASE_URL="https://…supabase.co"\nNEXT_PUBLIC_SUPABASE_ANON_KEY="…"\nSUPABASE_SERVICE_ROLE_KEY="…"',
+    title: "Fill in .env",
+    code: 'cp .env.example .env',
     detail:
-      "Supabase → Project Settings → API. The service role key is optional but lets the seed create demo logins for each role.",
+      "Paste in DATABASE_URL and DIRECT_URL (Project Settings \u2192 Database) and NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY (Project Settings \u2192 API). Four values.",
   },
   {
-    title: "Migrate and seed",
-    code: "npx prisma migrate dev\nnpx prisma db seed",
-    detail: "Creates the schema and a fully populated demo organization.",
+    title: "Set up the database",
+    code: "npm run setup",
+    detail:
+      "Applies the migrations and loads the demo organization \u2014 90 days of analytics, 29 posts, campaigns, ideas and a brand voice.",
   },
   {
-    title: "Restart the dev server",
+    title: "Start the app and sign up",
     code: "npm run dev",
-    detail: "Next.js reads .env at boot, so a restart is required.",
+    detail:
+      "Create an account with any email. You'll land straight in the demo organization with data already in it.",
   },
 ];
 
@@ -49,33 +46,27 @@ const LOCAL_STEPS: Step[] = [
 const DEPLOYED_STEPS: Step[] = [
   {
     title: "Create a Supabase project",
-    code: "supabase.com/dashboard → New project",
+    code: "supabase.com/dashboard \u2192 New project",
     detail:
-      "You need two things from it: the API keys (Project Settings → API) and both connection strings (Project Settings → Database).",
+      "One signup covers both things this app needs: the Postgres database and the auth keys.",
   },
   {
-    title: "Add the environment variables in Vercel",
-    code: "Project Settings → Environment Variables",
+    title: "Add four variables in Vercel",
+    code: "Project Settings \u2192 Environment Variables",
     detail:
-      "DATABASE_URL (pooled, port 6543), DIRECT_URL (direct, port 5432), NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, and optionally SUPABASE_SERVICE_ROLE_KEY.",
+      "DATABASE_URL and DIRECT_URL (Project Settings \u2192 Database), NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY (Project Settings \u2192 API).",
   },
   {
-    title: "Apply the migrations",
-    code: 'DIRECT_URL="postgresql://…" npx prisma migrate deploy',
+    title: "Set up the database",
+    code: 'DATABASE_URL="\u2026" DIRECT_URL="\u2026" npm run setup',
     detail:
-      "Run this from your machine against the Supabase database. Deploys do not migrate automatically — `migrate deploy` applies existing migrations without trying to author new ones.",
+      "Run this once from your machine against the Supabase database. Deploys do not migrate automatically.",
   },
   {
-    title: "Seed the demo organization (optional)",
-    code: "npx prisma db seed",
+    title: "Redeploy, then sign up",
+    code: "Deployments \u2192 \u22ef \u2192 Redeploy",
     detail:
-      "With SUPABASE_SERVICE_ROLE_KEY set, this also creates a demo login for each of the four roles. Skip it if you'd rather sign up fresh.",
-  },
-  {
-    title: "Redeploy",
-    code: "Deployments → ⋯ → Redeploy",
-    detail:
-      "Environment variables are read at build and boot, so the running deployment won't pick them up until it is replaced.",
+      "Environment variables are read at build and boot. Then create an account with any email \u2014 you'll land in the demo organization with data already in it.",
   },
 ];
 
@@ -110,13 +101,13 @@ export default function SetupPage() {
               {deployed ? (
                 <>
                   This deployment built successfully, but it has no database or
-                  Supabase project yet, so it can&rsquo;t sign anyone in. Five
+                  Supabase project yet, so it can&rsquo;t sign anyone in. Four
                   steps:
                 </>
               ) : (
                 <>
                   SocialOS needs a Postgres database and a Supabase project
-                  before it can sign anyone in. Five steps:
+                  before it can sign anyone in. Four steps:
                 </>
               )}
             </p>

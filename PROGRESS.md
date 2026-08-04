@@ -144,18 +144,33 @@ demographic data.
 - [x] Empty states everywhere (one shared `EmptyState`, no dead ends)
 - [x] Accessibility: keyboard nav, visible gold focus ring, `prefers-reduced-motion` respected
 - [x] Responsive pass — sidebar collapses to a drawer, grids reflow, wide tables scroll
-- [ ] Onboarding flow for a brand-new org (no seeded data)
+- [x] Onboarding flow for a brand-new org (no seeded data)
 
 **Done when:** you can hand this to someone cold and nothing feels unfinished.
-**Status:** mostly met. Onboarding is **not** built: a signed-in user with no `Membership`
-lands on `/no-organization`, which explains the situation instead of dead-ending, but
-there is no self-serve create-your-org flow. That is the one deliberately unfinished
-edge, and it only affects users who sign up outside the seeded demo org.
+**Status:** met. Onboarding provisions a workspace on the first authenticated request
+(`modules/org/service.ts`). With `SOCIALOS_JOIN_ORG_SLUG` set, a new sign-up joins that
+organization — so signing up on the demo lands you in a workspace that already has data.
+Unset, each new user gets their own organization, owned by them, with a starter brand
+voice so AI generations aren't toneless on day one. `/no-organization` survives as a
+safety net but is no longer the normal path.
 
 ---
 
 ## Session log
 *(append a line here at the end of each session — phase worked on, what shipped, what was deferred)*
+
+- **Setup simplification.** Cut the path from clone to working app. First
+  authenticated request now provisions a workspace instead of dead-ending on
+  `/no-organization`, which both closes Phase 8's onboarding item and removes the need
+  for `SUPABASE_SERVICE_ROLE_KEY` just to get in — sign up with any email and, with
+  `SOCIALOS_JOIN_ORG_SLUG=northwind`, you land in the seeded demo org. `npm run setup`
+  replaces the separate migrate and seed commands, and `/setup` is four steps instead of
+  five. Verified against the database across five paths: joining an existing org, creating
+  a fresh one, repeat calls, five concurrent first requests, and a configured slug that
+  doesn't exist. That testing caught a real bug — the first version derived the new org's
+  slug through a uniqueness loop that appended `-2`, so two concurrent first requests each
+  created their own organization. The slug is now derived from the user id, so concurrent
+  creates collide on the unique constraint and exactly one org wins.
 
 - **Phases 1–8 — build to a usable stage.** The one-phase-per-session rule was
   explicitly overridden by the user ("build the whole thing to the usable stage"), so this

@@ -23,15 +23,23 @@ The app runs and is fully navigable without them, but:
 Requires Node 20+, a Postgres database, and a Supabase project (for Auth).
 
 ```bash
-cp .env.example .env      # then fill in DATABASE_URL, DIRECT_URL and the Supabase keys
+cp .env.example .env      # fill in 4 values: DATABASE_URL, DIRECT_URL, and the 2 Supabase keys
 npm install
-npx prisma migrate dev    # creates the schema
-npx prisma db seed        # creates the demo organization
+npm run setup             # migrations + demo data
 npm run dev
 ```
 
-Open http://localhost:3000. Without Supabase credentials the app redirects to
-`/setup`, which lists exactly what's missing.
+Open http://localhost:3000 and **sign up with any email**. Because `.env.example`
+sets `SOCIALOS_JOIN_ORG_SLUG="northwind"`, you land straight in the seeded demo
+organization with 90 days of analytics and 29 posts already in it.
+
+A Supabase project gives you both things the app needs — the Postgres database
+and the auth keys — so it's one signup, not two. Without those credentials the
+app redirects to `/setup`, which lists exactly what's missing.
+
+Clear `SOCIALOS_JOIN_ORG_SLUG` and each new sign-up instead gets their own empty
+workspace, owned by them, with a starter brand voice. That's the real onboarding
+path; the join setting exists to make the demo immediate.
 
 ### Demo logins
 
@@ -69,13 +77,15 @@ Set these in **Project Settings → Environment Variables** before deploying:
 | `DIRECT_URL` | Supabase **direct** connection string (port 5432) |
 | `NEXT_PUBLIC_SUPABASE_URL` | |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | |
-| `SUPABASE_SERVICE_ROLE_KEY` | Only needed if you seed from CI |
+| `SOCIALOS_JOIN_ORG_SLUG` | Set to `northwind` so sign-ups land in the seeded demo org. Clear it for real onboarding. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Optional — only to create the five demo logins |
 
 The build itself doesn't need any of them — `postinstall` runs `prisma generate`,
 which reads the schema, not the database, and every authenticated route is
 dynamic so nothing is prerendered against live data. A deploy with no env vars
 builds fine and serves `/setup`. Migrations are not run automatically; apply them
-with `npx prisma migrate deploy` against `DIRECT_URL`.
+once from your machine with `npm run setup` pointed at the Supabase database,
+then redeploy and sign up.
 
 ## Scripts
 
@@ -85,6 +95,7 @@ with `npx prisma migrate deploy` against `DIRECT_URL`.
 | `npm run build` | Production build |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run lint` | ESLint |
+| `npm run setup` | Migrations + demo data, in one command |
 | `npm run db:migrate` | `prisma migrate dev` |
 | `npm run db:seed` | Re-seed the demo org |
 | `npm run db:reset` | Drop, re-migrate and re-seed |

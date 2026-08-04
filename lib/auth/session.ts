@@ -4,6 +4,7 @@ import type { Role } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import { createClient } from "@/lib/supabase/server";
+import { ensureWorkspace } from "@/modules/org/service";
 
 export type Session = {
   userId: string;
@@ -62,7 +63,25 @@ export const getSessionResult = cache(async (): Promise<SessionResult> => {
     },
   });
 
-  const membership = profile.memberships[0];
+  let membership = profile.memberships[0];
+
+  // First sign-in: provision a workspace rather than dead-ending (§11).
+  if (!membership) {
+    const provisioned = await ensureWorkspace({
+      id: profile.id,
+      email: profile.email,
+      name: profile.name,
+    });
+
+    if (provisioned) {
+      const created = await db.membership.findUnique({
+        where: { userId_orgId: { userId: profile.id, orgId: provisioned.orgId } },
+        include: { org: true },
+      });
+      if (created) membership = created;
+    }
+  }
+
   if (!membership) {
     return { status: "no-org", userId: profile.id, email: profile.email };
   }
