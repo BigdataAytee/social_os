@@ -84,8 +84,18 @@ The build itself doesn't need any of them — `postinstall` runs `prisma generat
 which reads the schema, not the database, and every authenticated route is
 dynamic so nothing is prerendered against live data. A deploy with no env vars
 builds fine and serves `/setup`. Migrations are not run automatically; apply them
-once from your machine with `npm run setup` pointed at the Supabase database,
-then redeploy and sign up.
+once from your own machine, then redeploy and sign up:
+
+```bash
+DATABASE_URL="postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres" \
+DIRECT_URL="postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres" \
+npm run setup
+```
+
+Both point at the **direct** connection (port 5432) for this one-off. The pooled
+connection on 6543 is transaction-mode pgbouncer, which is right for the running
+app but an unnecessary hazard for migrations and a write-heavy seed. In Vercel,
+`DATABASE_URL` should still be the pooled 6543 string.
 
 ## Scripts
 
