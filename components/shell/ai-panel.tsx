@@ -1,18 +1,27 @@
 "use client";
 
-import { createContext, useContext, useMemo, useState } from "react";
-import { PanelRight, Sparkles } from "lucide-react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { PanelRight } from "lucide-react";
 
+import { AssistantChat } from "@/components/assistant/assistant-chat";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 /**
- * The global AI panel.
+ * The global AI panel (ARCHITECTURE.md §9).
  *
- * Phase 0 ships the slot and the toggle only — Phase 1 makes it resizable and
- * Phase 4 wires it to /api/ai/chat (ARCHITECTURE.md §9). It lives in the shell
- * rather than per-page because the assistant is global by design: it can act on
- * whatever Studio you're in.
+ * It lives in the shell rather than on a page because the assistant is global
+ * by design: it can act on whichever Studio you're in. The chat inside is the
+ * same component the /assistant route renders, wired to the same orchestrator —
+ * there is no separate panel-only code path.
  */
 
 type AIPanelContext = { open: boolean; toggle: () => void };
@@ -50,59 +59,62 @@ export function AIPanelToggle() {
   );
 }
 
-const CAPABILITIES = [
-  "Draft a post in your brand voice",
-  "Repurpose one idea into all five Studios",
-  "Schedule to the next open calendar slot",
-  "Explain what moved this week's numbers",
-];
+const MIN_WIDTH = 300;
+const MAX_WIDTH = 640;
 
-export function AIPanel() {
+export function AIPanel({ modelConfigured }: { modelConfigured: boolean }) {
   const { open } = useAIPanel();
+  const [width, setWidth] = useState(380);
+  const dragging = useRef(false);
+
+  // Drag-to-resize (Phase 1). Listeners live on window so the pointer can leave
+  // the 4px handle mid-drag without the resize stopping.
+  const onPointerDown = useCallback(() => {
+    dragging.current = true;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }, []);
+
+  useEffect(() => {
+    function onMove(event: PointerEvent) {
+      if (!dragging.current) return;
+      const next = window.innerWidth - event.clientX;
+      setWidth(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, next)));
+    }
+    function onUp() {
+      if (!dragging.current) return;
+      dragging.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    }
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, []);
 
   return (
     <aside
       aria-label="AI assistant"
       aria-hidden={!open}
+      style={{ width: open ? width : 0 }}
       className={cn(
-        "hidden shrink-0 flex-col border-l border-border bg-surface transition-[width] duration-base ease-emphasized xl:flex",
-        open ? "w-80" : "w-0 overflow-hidden border-l-0"
+        "relative hidden shrink-0 flex-col border-l border-border bg-surface xl:flex",
+        !open && "overflow-hidden border-l-0"
       )}
     >
-      <div className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-4">
-        <Sparkles className="h-4 w-4 text-accent" />
-        <span className="font-display text-sm font-medium text-primary">
-          Assistant
-        </span>
-      </div>
-
-      <div className="flex flex-1 flex-col justify-between gap-6 p-4">
-        <div className="flex flex-col gap-3">
-          <p className="text-sm text-secondary">
-            The assistant works across every Studio and can act on your content,
-            not just talk about it.
-          </p>
-          <ul className="flex flex-col gap-2">
-            {CAPABILITIES.map((item) => (
-              <li
-                key={item}
-                className="rounded-md border border-border bg-surface-raised px-3 py-2 text-sm text-secondary"
-              >
-                {item}
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <div className="rounded-md border border-dashed border-border px-3 py-2.5">
-          <p className="font-mono text-[10px] uppercase tracking-wider text-muted">
-            Phase 4
-          </p>
-          <p className="text-xs text-muted">
-            Chat and tool-calling land here. See PROGRESS.md.
-          </p>
-        </div>
-      </div>
+      {open && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize AI panel"
+          onPointerDown={onPointerDown}
+          className="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize bg-transparent transition-colors hover:bg-accent/40"
+        />
+      )}
+      {open && <AssistantChat modelConfigured={modelConfigured} compact />}
     </aside>
   );
 }

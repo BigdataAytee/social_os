@@ -2,9 +2,21 @@
 
 SocialOS is an AI operating system for social media managers. Instead of five separate tools, get one app with dedicated Studios for X, TikTok, Instagram, Facebook, and YouTube — unified by an AI assistant, shared calendar, and a brand voice that keeps every post consistent.
 
-**Status:** Phase 0 (Foundation) complete. See [`PROGRESS.md`](./PROGRESS.md) for the
-phase checklist and [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the standing spec —
-read the latter in full before contributing.
+**Status:** Phases 0–8 built. Five Studios, a unified calendar with drag-to-reschedule,
+an AI assistant with tool-calling into the service layer, asset library, brand voice,
+team roles and cross-platform analytics — all reading and writing real rows. See
+[`PROGRESS.md`](./PROGRESS.md) for per-phase status including what is wired but not yet
+demonstrable, and [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the standing spec — read
+the latter in full before contributing.
+
+### Two things need credentials
+
+The app runs and is fully navigable without them, but:
+
+| Missing | Effect |
+| --- | --- |
+| `NEXT_PUBLIC_SUPABASE_*` | No sign-in. The app redirects to `/setup`, which lists what to fill in. |
+| `ANTHROPIC_API_KEY` | AI features fall back to a deterministic offline writer, clearly labelled "Local draft" in the UI. Generation, saving, history and brand-voice plumbing all still work; **assistant tool-calling does not**, since the fallback has no tool protocol. |
 
 ## Getting started
 

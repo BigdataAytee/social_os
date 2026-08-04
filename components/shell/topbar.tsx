@@ -1,16 +1,14 @@
-import { Bell, Search } from "lucide-react";
+import { Bell } from "lucide-react";
 
 import { MobileNav } from "@/components/shell/mobile-nav";
+import { SearchTrigger } from "@/components/shell/search-trigger";
 import { UserMenu } from "@/components/shell/user-menu";
 import { AIPanelToggle } from "@/components/shell/ai-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { Session } from "@/lib/auth/session";
 
-/**
- * Topbar. The ⌘K trigger is present but inert until Phase 1 builds the command
- * palette — it's here so the shell's proportions are settled now.
- */
+/** Topbar: search/⌘K, role, notifications, AI panel toggle and the user menu. */
 export function Topbar({
   session,
   unreadCount,
@@ -22,17 +20,7 @@ export function Topbar({
     <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border bg-surface px-3 sm:px-4">
       <MobileNav />
 
-      <button
-        type="button"
-        disabled
-        className="group flex h-8 max-w-xs flex-1 items-center gap-2 rounded-md border border-border bg-surface-raised px-3 text-left text-sm text-muted transition-colors disabled:cursor-default"
-      >
-        <Search className="h-3.5 w-3.5" />
-        <span className="flex-1 truncate">Search or jump to…</span>
-        <kbd className="hidden rounded-sm border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted sm:inline">
-          ⌘K
-        </kbd>
-      </button>
+      <SearchTrigger />
 
       <div className="flex flex-1 items-center justify-end gap-1.5">
         <Badge variant="default" className="hidden md:inline-flex">

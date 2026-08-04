@@ -1,25 +1,37 @@
 import type { Metadata } from "next";
 
-import { PagePlaceholder } from "@/components/shell/page-placeholder";
+import { CalendarBoard } from "@/components/calendar/calendar-board";
+import { PageHeader } from "@/components/shell/page-placeholder";
+import { Badge } from "@/components/ui/badge";
+import { requireSession } from "@/lib/auth/session";
+import { listPosts } from "@/modules/posts/service";
 
 export const metadata: Metadata = { title: "Calendar · SocialOS" };
 
-export default function CalendarPage() {
+/** One calendar across all five platforms (Phase 5). */
+export default async function CalendarPage() {
+  const session = await requireSession();
+  const posts = await listPosts(session);
+
   return (
-    <PagePlaceholder
-      eyebrow="Workspace"
-      title="Content Calendar"
-      description="One calendar across all five platforms — drafts, scheduled, published and campaign spans in the same grid."
-      phase="Phase 5"
-      features={[
-        "Unified month / week view",
-        "Drafts, scheduled, published",
-        "Campaign spans",
-        "Drag-and-drop rescheduling",
-        "Platform filters",
-        "Status filters",
-        "Approvals view",
-      ]}
-    />
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-6 py-8 animate-fade-in">
+      <PageHeader
+        eyebrow="Workspace"
+        title="Content Calendar"
+        description="Drafts, approvals, scheduled posts and published work — every platform in one grid. Drag a post to move it."
+        action={<Badge variant="accent">{posts.length} posts</Badge>}
+      />
+
+      <CalendarBoard
+        posts={posts.map((p) => ({
+          id: p.id,
+          platform: p.platform,
+          status: p.status,
+          body: p.body,
+          scheduledAt: p.scheduledAt?.toISOString() ?? null,
+          campaignName: p.campaign?.name ?? null,
+        }))}
+      />
+    </div>
   );
 }

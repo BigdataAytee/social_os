@@ -65,3 +65,11 @@ export function assertCan(role: Role, action: Action): void {
     throw new Error(`Role ${role} is not permitted to ${action}`);
   }
 }
+
+/** One-line description of each role, shown on the Team screen. */
+export const ROLE_SUMMARY: Record<Role, string> = {
+  OWNER: "Full access, including org settings and deletion",
+  ADMIN: "Manages members, integrations and approvals",
+  EDITOR: "Creates and edits content; can't publish or approve",
+  VIEWER: "Read-only; can comment",
+};
