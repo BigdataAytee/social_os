@@ -80,11 +80,34 @@ Set these in **Project Settings → Environment Variables** before deploying:
 | `SOCIALOS_JOIN_ORG_SLUG` | Set to `northwind` so sign-ups land in the seeded demo org. Clear it for real onboarding. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Optional — only to create the five demo logins |
 
-The build itself doesn't need any of them — `postinstall` runs `prisma generate`,
-which reads the schema, not the database, and every authenticated route is
-dynamic so nothing is prerendered against live data. A deploy with no env vars
-builds fine and serves `/setup`. Migrations are not run automatically; apply them
-once from your own machine, then redeploy and sign up:
+### The database sets itself up on deploy
+
+`vercel-build` runs `scripts/prepare-database.ts` before `next build`, so a
+production deploy applies migrations and — the first time only — loads the demo
+data. You don't run anything by hand.
+
+Three guards make that safe to leave on:
+
+| Situation | What happens |
+| --- | --- |
+| Preview deployment | **Skipped.** Vercel gives previews the same env vars as production, so migrating from a preview build would hit the production database. Override with `SOCIALOS_DB_SETUP_ON_PREVIEW=1` only if a preview has its own database. |
+| `DATABASE_URL` not set | Skipped, build succeeds, app serves `/setup`. |
+| Database already has an organization | Migrations still apply; **the seed is skipped.** `prisma/seed.ts` deletes and rebuilds the demo org, so re-running it on a redeploy would erase anything published since. |
+| Database configured but unreachable, or a migration fails | **Build fails.** Shipping code that expects a newer schema than the database has is worse than a red deploy. |
+
+Set `SOCIALOS_SKIP_SEED=1` to migrate without ever loading demo data.
+
+`npm run build` deliberately stays database-free, so local builds and CI need no
+credentials. Only `vercel-build` touches the database.
+
+The build needs no environment variables to succeed — `postinstall` runs
+`prisma generate`, which reads the schema rather than the database, and every
+authenticated route is dynamic so nothing is prerendered against live data.
+
+### Setting the database up by hand instead
+
+If you'd rather not have deploys touch the database, set `SOCIALOS_SKIP_SEED=1`
+(or just run this before the first deploy):
 
 ```bash
 DATABASE_URL="postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres" \
@@ -105,7 +128,8 @@ app but an unnecessary hazard for migrations and a write-heavy seed. In Vercel,
 | `npm run build` | Production build |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run lint` | ESLint |
-| `npm run setup` | Migrations + demo data, in one command |
+| `npm run setup` | Migrations + demo data, in one command (manual path) |
+| `npm run vercel-build` | What Vercel runs: prepare the database, then build |
 | `npm run db:migrate` | `prisma migrate dev` |
 | `npm run db:seed` | Re-seed the demo org |
 | `npm run db:reset` | Drop, re-migrate and re-seed |
