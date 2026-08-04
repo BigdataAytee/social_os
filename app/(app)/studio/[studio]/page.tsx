@@ -2,14 +2,9 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 
 import { PagePlaceholder } from "@/components/shell/page-placeholder";
-import { STUDIOS, getStudio } from "@/lib/studios";
+import { getStudio } from "@/lib/studios";
 
 type Params = { params: { studio: string } };
-
-/** One route per registry entry — the five Studios are static, so prerender them. */
-export function generateStaticParams() {
-  return STUDIOS.map((studio) => ({ studio: studio.slug }));
-}
 
 export function generateMetadata({ params }: Params): Metadata {
   const studio = getStudio(params.studio);

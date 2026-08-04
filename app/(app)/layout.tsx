@@ -12,6 +12,14 @@ import { db } from "@/lib/db";
  * Every route in this group renders inside it, so navigation never remounts the
  * sidebar or the AI panel.
  */
+
+/**
+ * Nothing in this group may be prerendered or cached: every page renders the
+ * signed-in user's org, role and unread count. `requireSession()` reads cookies,
+ * which already forces a dynamic render — this states the requirement outright
+ * so it can't be lost to a future refactor that makes the layout look cacheable.
+ */
+export const dynamic = "force-dynamic";
 export default async function AppLayout({
   children,
 }: {

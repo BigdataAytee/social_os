@@ -40,6 +40,31 @@ Password comes from `SEED_DEMO_PASSWORD` (default `socialos-demo-1234`).
 The seed is idempotent and deterministic — re-running rebuilds the demo org with
 the same numbers rather than duplicating it.
 
+## Deploying to Vercel
+
+`vercel.json` pins the framework preset to `nextjs`. This matters: if a Vercel
+project was created against this repo *before* the app existed, framework
+detection found nothing, defaulted to the "Other" preset, and the deploy fails
+with `No Output Directory named "public" found`. The pin overrides that. If a
+deploy still fails that way, also set **Project Settings → Build & Development
+Settings → Framework Preset → Next.js**.
+
+Set these in **Project Settings → Environment Variables** before deploying:
+
+| Var | Notes |
+| --- | --- |
+| `DATABASE_URL` | Supabase **pooled** connection string (port 6543) |
+| `DIRECT_URL` | Supabase **direct** connection string (port 5432) |
+| `NEXT_PUBLIC_SUPABASE_URL` | |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | |
+| `SUPABASE_SERVICE_ROLE_KEY` | Only needed if you seed from CI |
+
+The build itself doesn't need any of them — `postinstall` runs `prisma generate`,
+which reads the schema, not the database, and every authenticated route is
+dynamic so nothing is prerendered against live data. A deploy with no env vars
+builds fine and serves `/setup`. Migrations are not run automatically; apply them
+with `npx prisma migrate deploy` against `DIRECT_URL`.
+
 ## Scripts
 
 | Command | Does |
