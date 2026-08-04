@@ -93,9 +93,14 @@ Three guards make that safe to leave on:
 | Preview deployment | **Skipped.** Vercel gives previews the same env vars as production, so migrating from a preview build would hit the production database. Override with `SOCIALOS_DB_SETUP_ON_PREVIEW=1` only if a preview has its own database. |
 | `DATABASE_URL` not set | Skipped, build succeeds, app serves `/setup`. |
 | Database already has an organization | Migrations still apply; **the seed is skipped.** `prisma/seed.ts` deletes and rebuilds the demo org, so re-running it on a redeploy would erase anything published since. |
-| Database configured but unreachable, or a migration fails | **Build fails.** Shipping code that expects a newer schema than the database has is worse than a red deploy. |
+| Database unreachable, or a migration fails | **Build still succeeds.** The problem is reported in the build log, and the running app sends you to `/setup`, which names the specific failure. A failed deploy just yields a Vercel 404 with nothing to act on. |
 
 Set `SOCIALOS_SKIP_SEED=1` to migrate without ever loading demo data.
+
+The app never renders pages against a database it can't use: `lib/db-health.ts`
+checks the connection on each authenticated request and redirects to `/setup`
+when the database is missing, unreachable, or un-migrated — so a bad
+`DIRECT_URL` shows you which of those it is instead of a 500.
 
 `npm run build` deliberately stays database-free, so local builds and CI need no
 credentials. Only `vercel-build` touches the database.

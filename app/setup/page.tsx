@@ -2,6 +2,11 @@ import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 
 import { Logo } from "@/components/shell/logo";
+import {
+  DATABASE_STATUS_MESSAGE,
+  checkDatabase,
+  type DatabaseStatus,
+} from "@/lib/db-health";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 
 export const metadata: Metadata = { title: "Setup · SocialOS" };
@@ -78,11 +83,19 @@ const REQUIRED_VARS = [
 ] as const;
 
 /**
- * Shown when the app has no Supabase configuration. Without this, a cold clone
- * — or a first deploy — gets an opaque SDK crash instead of instructions.
+ * Shown when the app can't run yet — no Supabase configuration, or a database
+ * that is missing, unreachable, or un-migrated. Without this a cold clone, or a
+ * deploy whose migrations didn't run, gets an opaque crash instead of a
+ * statement of what's wrong.
  */
-export default function SetupPage() {
-  if (isSupabaseConfigured()) redirect("/dashboard");
+export default async function SetupPage() {
+  const supabaseReady = isSupabaseConfigured();
+  const database = await checkDatabase();
+
+  // Only leave once both halves actually work. Redirecting on Supabase config
+  // alone would bounce straight back here from requireSession when the database
+  // is the broken half — a loop.
+  if (supabaseReady && database === "ok") redirect("/dashboard");
 
   const deployed = Boolean(process.env.VERCEL);
   const steps = deployed ? DEPLOYED_STEPS : LOCAL_STEPS;
@@ -100,9 +113,9 @@ export default function SetupPage() {
             <p className="text-balance text-secondary">
               {deployed ? (
                 <>
-                  This deployment built successfully, but it has no database or
-                  Supabase project yet, so it can&rsquo;t sign anyone in. Four
-                  steps:
+                  This deployment built and is running — it just isn&rsquo;t
+                  connected to a working database and Supabase project yet, so it
+                  can&rsquo;t sign anyone in. Four steps:
                 </>
               ) : (
                 <>
@@ -112,6 +125,10 @@ export default function SetupPage() {
               )}
             </p>
           </div>
+
+          {database !== "ok" && (
+            <DatabaseNotice status={database} deployed={deployed} />
+          )}
 
           {missing.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-surface px-4 py-3">
@@ -158,6 +175,52 @@ export default function SetupPage() {
             : "This screen disappears once the Supabase variables are set and the dev server is restarted."}
         </p>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The specific database failure, stated plainly. This is the difference between
+ * "something is wrong" and knowing whether to fix a URL or run migrations.
+ */
+function DatabaseNotice({
+  status,
+  deployed,
+}: {
+  status: Exclude<DatabaseStatus, "ok">;
+  deployed: boolean;
+}) {
+  const critical = status !== "unconfigured";
+
+  return (
+    <div
+      className={`flex flex-col gap-2 rounded-md border px-4 py-3 ${
+        critical
+          ? "border-danger/30 bg-danger/5"
+          : "border-warning/30 bg-warning/5"
+      }`}
+    >
+      <p
+        className={`font-mono text-[10px] uppercase tracking-wider ${
+          critical ? "text-danger" : "text-warning"
+        }`}
+      >
+        Database &mdash; {status.replace("-", " ")}
+      </p>
+      <p className="text-sm text-secondary">
+        {DATABASE_STATUS_MESSAGE[status]}
+      </p>
+      {status === "not-migrated" && deployed && (
+        <p className="text-xs text-muted">
+          Check the last build log for a line beginning{" "}
+          <code className="font-mono text-[11px] text-secondary">
+            ⚠ Migrations did not run
+          </code>{" "}
+          &mdash; it carries the error the database returned. The usual cause is{" "}
+          <code className="font-mono text-[11px] text-secondary">DIRECT_URL</code>{" "}
+          pointing at the pooled port 6543 rather than 5432.
+        </p>
+      )}
     </div>
   );
 }
