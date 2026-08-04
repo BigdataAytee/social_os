@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { cache } from "react";
 import type { Role } from "@prisma/client";
 
+import { checkDatabase } from "@/lib/db-health";
 import { db } from "@/lib/db";
 import { createClient } from "@/lib/supabase/server";
 import { ensureWorkspace } from "@/modules/org/service";
@@ -19,6 +20,8 @@ export type Session = {
 
 export type SessionResult =
   | { status: "anonymous" }
+  /** The database is missing, unreachable, or has no tables yet. */
+  | { status: "db-unavailable" }
   /** Authenticated with Supabase, but not a member of any org yet.
    *  Phase 8 turns this into the onboarding flow. */
   | { status: "no-org"; userId: string; email: string }
@@ -38,6 +41,11 @@ export const getSessionResult = cache(async (): Promise<SessionResult> => {
   } = await supabase.auth.getUser();
 
   if (!user) return { status: "anonymous" };
+
+  // Deploys no longer fail on a database that can't be migrated, so the app can
+  // legitimately be running without a usable one. Check before touching it —
+  // otherwise the first query throws and the page 500s with nothing to act on.
+  if ((await checkDatabase()) !== "ok") return { status: "db-unavailable" };
 
   const email = user.email ?? `${user.id}@unknown.local`;
 
@@ -113,6 +121,8 @@ export async function getSession(): Promise<Session | null> {
 export async function requireSession(): Promise<Session> {
   const result = await getSessionResult();
   if (result.status === "anonymous") redirect("/login");
+  // /setup names the specific problem rather than showing a generic error.
+  if (result.status === "db-unavailable") redirect("/setup");
   if (result.status === "no-org") redirect("/no-organization");
   return result.session;
 }

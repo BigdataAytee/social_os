@@ -17,11 +17,13 @@
  *      erase whatever the org had published since. The guard below is the only
  *      thing standing between a routine redeploy and that.
  *
- * Never fails the build for *absence* of configuration — a project with no
- * DATABASE_URL still deploys and serves /setup, which explains what's missing.
- * It does fail for a database that is configured but unreachable or refuses a
- * migration, because shipping code that expects a newer schema than the
- * database has is worse than a red deploy.
+ * This step never fails the build. An earlier version did fail on an unreachable
+ * database, on the theory that shipping code against a schema it doesn't match
+ * is worse than a red deploy — but the practical result was a Vercel 404 with
+ * no way to see what went wrong. Deploying and *reporting* the problem beats
+ * blocking the deploy: lib/db-health.ts detects an unusable database at
+ * request time and sends you to /setup, which names the specific failure, so
+ * the app never renders against a schema it can't use.
  */
 
 import { spawnSync } from "node:child_process";
@@ -61,7 +63,12 @@ async function main() {
   }
 
   console.log("→ Applying migrations (prisma migrate deploy)…");
-  run("npx", ["prisma", "migrate", "deploy"]);
+  try {
+    run("npx", ["prisma", "migrate", "deploy"]);
+  } catch (error) {
+    warn("Migrations did not run.", error);
+    return;
+  }
 
   if (process.env.SOCIALOS_SKIP_SEED === "1") {
     console.log("→ SOCIALOS_SKIP_SEED=1 — leaving the database empty.");
@@ -69,6 +76,7 @@ async function main() {
   }
 
   const db = new PrismaClient();
+  let shouldSeed = false;
   try {
     // The guard. An organization existing means this database has been seeded
     // (or genuinely used), and the destructive seed must not touch it.
@@ -78,22 +86,42 @@ async function main() {
       console.log(
         `→ Database already has ${organizations} organization${organizations === 1 ? "" : "s"} — skipping the demo seed so existing content is left alone.`
       );
-      return;
+    } else {
+      console.log("→ Empty database — seeding the demo organization…");
+      shouldSeed = true;
     }
-
-    console.log("→ Empty database — seeding the demo organization…");
+  } catch (error) {
+    // Can't read the guard, so we can't prove the database is empty. Skipping
+    // is the only safe move: the seed deletes and rebuilds the demo org, and
+    // running it against a database we couldn't inspect risks erasing content.
+    warn("Couldn't check whether the database is already seeded, so the seed was skipped.", error);
+    return;
   } finally {
     await db.$disconnect();
   }
 
-  run("npx", ["prisma", "db", "seed"]);
+  if (!shouldSeed) return;
+
+  try {
+    run("npx", ["prisma", "db", "seed"]);
+  } catch (error) {
+    warn("Seeding failed. The schema is in place but there's no demo data.", error);
+  }
 }
 
-main().catch((error) => {
-  console.error("\n✗ Database preparation failed.\n");
-  console.error(error instanceof Error ? error.message : error);
-  console.error(
-    "\nThe deploy has been stopped rather than shipping code against a database that may not match it. Check DATABASE_URL and DIRECT_URL in Project Settings → Environment Variables, then redeploy.\n"
+/**
+ * Report and carry on. The build continues so the app deploys and can explain
+ * the problem on /setup, which is more use than a failed deploy.
+ */
+function warn(summary: string, error: unknown) {
+  console.warn(`\n⚠ ${summary}`);
+  console.warn(error instanceof Error ? error.message : String(error));
+  console.warn(
+    "The build will continue. The app will deploy and show /setup, which names the problem — it won't render pages against a database it can't use. Fix DATABASE_URL / DIRECT_URL and redeploy.\n"
   );
-  process.exit(1);
+}
+
+// Deliberately resolves even on failure — see the note at the top of the file.
+main().catch((error) => {
+  warn("Database preparation hit an unexpected error.", error);
 });
