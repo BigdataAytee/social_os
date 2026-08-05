@@ -82,6 +82,44 @@ const REQUIRED_VARS = [
   "NEXT_PUBLIC_SUPABASE_ANON_KEY",
 ] as const;
 
+/** Ignore case, underscores and hyphens — DATABASE-url and databaseUrl both hit. */
+function normalizeName(name: string) {
+  return name.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+/**
+ * Variables whose name is *nearly* one we expect.
+ *
+ * "It's set but the app says it isn't" almost always means the name is wrong —
+ * a typo, a stray space, the wrong case — and the Vercel dashboard masks values
+ * but shows names in a list too long to proofread. Naming the near-miss turns
+ * that into a one-line fix. Names only; a value is never read here.
+ */
+function nearMisses(): { found: string; expected: string }[] {
+  const expected = new Map(REQUIRED_VARS.map((n) => [normalizeName(n), n]));
+  const out: { found: string; expected: string }[] = [];
+
+  for (const found of Object.keys(process.env)) {
+    if ((REQUIRED_VARS as readonly string[]).includes(found)) continue;
+    const match = expected.get(normalizeName(found));
+    if (match) out.push({ found, expected: match });
+  }
+  return out;
+}
+
+/** Which deployment is answering, so a stale one is obvious at a glance. */
+function deploymentFacts(): { label: string; value: string }[] {
+  const facts: [string, string | undefined][] = [
+    ["Environment", process.env.VERCEL_ENV],
+    ["Branch", process.env.VERCEL_GIT_COMMIT_REF],
+    ["Commit", process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7)],
+    ["Host", process.env.VERCEL_URL],
+  ];
+  return facts
+    .filter((f): f is [string, string] => Boolean(f[1]))
+    .map(([label, value]) => ({ label, value }));
+}
+
 /**
  * Shown when the app can't run yet — no Supabase configuration, or a database
  * that is missing, unreachable, or un-migrated. Without this a cold clone, or a
@@ -100,6 +138,8 @@ export default async function SetupPage() {
   const deployed = Boolean(process.env.VERCEL);
   const steps = deployed ? DEPLOYED_STEPS : LOCAL_STEPS;
   const missing = REQUIRED_VARS.filter((name) => !process.env[name]);
+  const misnamed = nearMisses();
+  const facts = deploymentFacts();
 
   return (
     <div className="min-h-screen bg-canvas px-6 py-16">
@@ -128,18 +168,72 @@ export default async function SetupPage() {
 
           <DatabaseNotice health={database} deployed={deployed} />
 
-          {missing.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-surface px-4 py-3">
+          {/* Every expected variable, present or not. Listing the ones it *can*
+              see is what distinguishes "I never saved it" from "I saved it on
+              the wrong project, environment, or under the wrong name". */}
+          <div className="flex flex-col gap-2 rounded-md border border-border bg-surface px-4 py-3">
+            <p className="font-mono text-[10px] uppercase tracking-wider text-muted">
+              Environment variables this deployment can see
+            </p>
+            <ul className="flex flex-col gap-1">
+              {REQUIRED_VARS.map((name) => {
+                const present = Boolean(process.env[name]);
+                return (
+                  <li key={name} className="flex items-center gap-2 text-xs">
+                    <span
+                      aria-hidden
+                      className={`font-mono ${present ? "text-success" : "text-warning"}`}
+                    >
+                      {present ? "✓" : "✗"}
+                    </span>
+                    <code className="font-mono text-[11px] text-secondary">
+                      {name}
+                    </code>
+                    <span className="text-muted">
+                      {present ? "set" : "not set"}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+
+            {missing.length > 0 && (
+              <p className="text-xs text-muted">
+                Values are read at build and at boot. If you added these after
+                the current deployment was built, redeploy — editing a variable
+                does not rebuild anything on its own.
+              </p>
+            )}
+          </div>
+
+          {misnamed.length > 0 && (
+            <div className="flex flex-col gap-1.5 rounded-md border border-warning/30 bg-warning/5 px-4 py-3">
+              <p className="font-mono text-[10px] uppercase tracking-wider text-warning">
+                Nearly right
+              </p>
+              {misnamed.map((m) => (
+                <p key={m.found} className="text-xs text-secondary">
+                  <code className="font-mono text-[11px]">{m.found}</code> is
+                  set, but the app reads{" "}
+                  <code className="font-mono text-[11px]">{m.expected}</code>.
+                  Rename it and redeploy.
+                </p>
+              ))}
+            </div>
+          )}
+
+          {facts.length > 0 && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border border-border bg-surface px-4 py-2.5">
               <span className="font-mono text-[10px] uppercase tracking-wider text-muted">
-                Not set
+                Serving
               </span>
-              {missing.map((name) => (
-                <code
-                  key={name}
-                  className="rounded-sm border border-warning/30 bg-warning/10 px-1.5 py-0.5 font-mono text-[11px] text-warning"
-                >
-                  {name}
-                </code>
+              {facts.map((fact) => (
+                <span key={fact.label} className="text-xs text-muted">
+                  {fact.label}{" "}
+                  <code className="font-mono text-[11px] text-secondary">
+                    {fact.value}
+                  </code>
+                </span>
               ))}
             </div>
           )}
