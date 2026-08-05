@@ -53,6 +53,8 @@ const TYPE_BRIEF: Record<GenerationType, string> = {
   repurpose:
     "Rewrite the source material for this platform. Keep the substance; change the shape, length and rhythm to fit.",
   chat: "Respond conversationally and concretely.",
+  "account-ideas":
+    "You are given a performance report for a real connected account. Ground every idea in it: cite the pattern each idea exploits — a format, a slot, a length, or a topic that outperformed — using the numbers provided. Do not invent numbers that are not in the report, and do not recommend a pattern the report marks as low-sample. Output one idea per line, no numbering and no headings; put the rationale in a trailing parenthesis on the same line.",
 };
 
 export function brandVoiceBlock(voice: BrandVoice | null): string {

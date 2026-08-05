@@ -4,7 +4,12 @@ import { z } from "zod";
 export const ideaSchema = z.object({
   platform: z.nativeEnum(Platform),
   content: z.string().min(1).max(2000),
-  source: z.enum(["manual", "ai", "swipe-file"]).default("manual"),
+  // "ai-insights" is distinct from "ai": it means the idea came from analysing
+  // a connected account's real performance, not from a prompt. Worth telling
+  // apart in the list — one is evidence-backed and the other isn't.
+  source: z
+    .enum(["manual", "ai", "ai-insights", "swipe-file"])
+    .default("manual"),
 });
 
 export const campaignSchema = z.object({

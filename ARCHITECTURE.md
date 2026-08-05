@@ -264,7 +264,8 @@ Single entry point: `POST /api/ai/chat`, backed by `modules/ai/orchestrator.ts`.
 - Every request assembles context: brand voice (§4), the active Studio, the
   target platform's constraints, and any explicitly attached entities.
 - **Tool calling** maps to the service layer, never to Prisma:
-  `createPost`, `scheduleContent`, `repurposeContent`, `listIdeas`, `saveIdea`.
+  `createPost`, `scheduleContent`, `repurposeContent`, `listIdeas`, `saveIdea`,
+  `generateIdeasFromAccount`.
 - Every generation is persisted as an `AIGeneration` row (org, user, studio,
   type, input, output) — this is both the audit trail and the source for
   "recent generations" surfaces.
@@ -286,10 +287,45 @@ interface PlatformAdapter {
 }
 ```
 
-v1 ships `MockAdapter` for all five. `ConnectedAccount.status` defaults to `MOCK`.
-The UI reads `status` for display only and must never branch its behaviour on it —
-when a real adapter lands, only the registry entry changes. Raw tokens never go
-in `ConnectedAccount.meta`; that column is display fields only.
+`MockAdapter` implements all five. `ConnectedAccount.status` defaults to `MOCK`.
+The UI reads `status` for display only and must never branch its behaviour on it.
+Raw tokens never go in `ConnectedAccount.meta`; that column is display fields only.
+
+### Connected accounts (OAuth 2.0)
+
+`LiveAdapter` reads the real APIs. `getAdapter()` returns it only when the
+platform has OAuth client credentials **and** `SOCIALOS_ENCRYPTION_KEY` is set;
+otherwise the mock, so an unconfigured platform is fully working rather than
+broken. Selection is per call, not a module constant — the environment decides.
+
+- **Tokens** live in `PlatformCredential`, one row per account, AES-256-GCM
+  (`lib/crypto.ts`). Nothing outside `oauth/service.ts` sees a decrypted token:
+  `withAccessToken(accountId, use)` hands it to a callback and never returns it,
+  which is what keeps it out of logs, RSC payloads and error messages. It also
+  refreshes ahead of expiry rather than reacting to a 401.
+- **CSRF** is a signed `state` (HMAC over org, user, platform, nonce, 10-minute
+  TTL) *plus* a nonce echoed in an httpOnly cookie. State alone proves we issued
+  it; the cookie proves this browser started it. PKCE S256 for X and TikTok.
+- **Connect starts at a route handler**, not a server action, because the
+  browser must land on the platform's domain and the PKCE/CSRF cookies have to
+  be set on that same redirect: `app/api/oauth/[platform]/{start,callback}`.
+- **Scopes are read-only.** `publish` and `fetchTrends` therefore delegate to the
+  mock — real publishing needs write scopes and platform review, and none of the
+  five expose trends on these tiers.
+- **Disconnect deletes the credential, not the account.** Deleting the account
+  would cascade away every snapshot and pulled post with it.
+- **`fetchPosts`** is the added capability: `AnalyticsSnapshot` says engagement
+  rose, but not which post caused it or what format it was. Results land in
+  `ExternalPost`, upserted on `(accountId, externalId)` so a re-sync updates
+  metrics rather than duplicating rows.
+
+`modules/insights/service.ts` turns those rows into patterns — format, timing,
+length and topic performance, plus top posts — measured in **engagement rate**,
+not raw engagement, so a growing account doesn't score every recent post highest.
+Every bucket needs a minimum sample or it is omitted: a "best time to post" drawn
+from two posts is worse than no answer, because it will be believed.
+`generateIdeasFromAccount` hands the model that finished report rather than raw
+rows, and is exposed to the assistant as a tool like everything else in §9.
 
 ## §11 — Auth and environment
 
@@ -311,6 +347,12 @@ Environment (`.env.example` is the contract):
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key |
 | `SUPABASE_SERVICE_ROLE_KEY` | server-only; used by the seed to create demo auth users |
 | `ANTHROPIC_API_KEY` | AI orchestrator (Phase 2+) |
+| `SOCIALOS_ENCRYPTION_KEY` | server-only; AES-256-GCM key for stored platform tokens |
+| `SOCIALOS_PUBLIC_URL` | origin used to build OAuth callback URLs |
+| `X_CLIENT_ID` / `X_CLIENT_SECRET` | X OAuth app |
+| `TIKTOK_CLIENT_KEY` / `TIKTOK_CLIENT_SECRET` | TikTok OAuth app |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | YouTube OAuth app |
+| `META_CLIENT_ID` / `META_CLIENT_SECRET` | Instagram + Facebook share one Meta app |
 
 ## §12 — Seed data
 

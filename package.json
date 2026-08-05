@@ -14,6 +14,7 @@
     "db:reset": "prisma migrate reset",
     "db:studio": "prisma studio",
     "smoke": "tsx scripts/smoke.ts",
+    "smoke:oauth": "tsx scripts/oauth-e2e.ts",
     "postinstall": "prisma generate",
     "setup": "prisma migrate deploy && prisma db seed"
   },

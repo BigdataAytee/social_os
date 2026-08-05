@@ -8,8 +8,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   // Supabase serves the app through the pooler (pgbouncer), which can't run
   // migrations. DIRECT_URL is the unpooled connection used by `prisma migrate`.
   // For a plain local Postgres, set both to the same value. See ARCHITECTURE.md §11.
@@ -66,6 +66,7 @@ model Organization {
 
   memberships       Membership[]
   connectedAccounts ConnectedAccount[]
+  externalPosts     ExternalPost[]
   posts             Post[]
   campaigns         Campaign[]
   ideas             Idea[]
@@ -119,20 +120,98 @@ model Membership {
 // is wired; UI never needs to know the difference.
 
 model ConnectedAccount {
-  id        String                 @id @default(cuid())
-  orgId     String
-  platform  Platform
-  handle    String
-  status    ConnectedAccountStatus @default(MOCK)
-  meta      Json? // adapter-specific display fields only — never store raw tokens here
-  createdAt DateTime               @default(now())
+  id            String                 @id @default(cuid())
+  orgId         String
+  platform      Platform
+  handle        String
+  status        ConnectedAccountStatus @default(MOCK)
+  meta          Json? // adapter-specific display fields only — never store raw tokens here
+  /// Last successful pull from the platform API. Null means never synced.
+  lastSyncAt    DateTime?
+  /// Why the last sync failed, if it did. Cleared on the next success.
+  lastSyncError String?
+  createdAt     DateTime               @default(now())
 
-  org       Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  snapshots AnalyticsSnapshot[]
+  org           Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  snapshots     AnalyticsSnapshot[]
+  credential    PlatformCredential?
+  externalPosts ExternalPost[]
 
   @@unique([orgId, platform, handle])
   @@index([orgId])
   @@map("connected_accounts")
+}
+
+/// OAuth tokens for a ConnectedAccount, encrypted at rest.
+///
+/// A separate table rather than columns on ConnectedAccount because
+/// ARCHITECTURE.md §10 reserves `meta` for display fields and forbids tokens
+/// anywhere on that row. Keeping them apart also means every ordinary account
+/// read — the Studio header, the analytics page, the account picker — never
+/// loads ciphertext, and disconnecting is a delete here rather than a
+/// nullable-column dance on a row other things reference.
+///
+/// `ciphertext` is AES-256-GCM over a JSON envelope holding the access token and
+/// (when the platform issues one) the refresh token. See lib/crypto.ts.
+model PlatformCredential {
+  accountId  String    @id
+  /// Base64 AES-256-GCM ciphertext of { accessToken, refreshToken }.
+  ciphertext String
+  /// Base64 initialisation vector, unique per encryption.
+  iv         String
+  /// Base64 GCM authentication tag — detects tampering on decrypt.
+  authTag    String
+  /// When the access token expires. Null for platforms that issue non-expiring
+  /// tokens. The refresh happens ahead of this, not on a 401.
+  expiresAt  DateTime?
+  /// Scopes actually granted, which can be narrower than those requested.
+  scopes     String[]
+  /// The platform's own id for the account, used in its API paths.
+  externalId String
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  account ConnectedAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@map("platform_credentials")
+}
+
+/// A post pulled from a connected platform, with the metrics that platform
+/// reports for it.
+///
+/// Deliberately not the `Post` table: `Post` is content authored in SocialOS and
+/// carries an author, a status and an approval history. These are read-only
+/// observations of what already went out — including posts published long before
+/// this org existed — and they exist so insights can analyse real performance
+/// per post rather than only the daily rollups in AnalyticsSnapshot.
+model ExternalPost {
+  id          String   @id @default(cuid())
+  orgId       String
+  accountId   String
+  /// The platform's id for this post. Unique per account, and what makes a
+  /// re-sync an update rather than a duplicate.
+  externalId  String
+  permalink   String?
+  text        String
+  /// "video" | "image" | "carousel" | "text" — normalised across platforms so
+  /// format analysis can compare like with like.
+  mediaType   String
+  publishedAt DateTime
+  likes       Int      @default(0)
+  comments    Int      @default(0)
+  shares      Int      @default(0)
+  views       Int      @default(0)
+  /// Metrics the platform reports that don't map onto the four above —
+  /// saves, watch time, click-throughs. Display and analysis only.
+  metrics     Json     @default("{}")
+  fetchedAt   DateTime @default(now())
+
+  org     Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  account ConnectedAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, externalId])
+  @@index([orgId, publishedAt])
+  @@map("external_posts")
 }
 
 // ============================ CONTENT ============================
@@ -220,7 +299,7 @@ model Asset {
   createdAt DateTime @default(now())
 
   org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  folder Folder?       @relation(fields: [folderId], references: [id])
+  folder Folder?      @relation(fields: [folderId], references: [id])
 
   @@index([orgId, folderId])
   @@map("assets")
