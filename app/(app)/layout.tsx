@@ -5,6 +5,7 @@ import { StudioTheme } from "@/components/shell/studio-theme";
 import { Topbar } from "@/components/shell/topbar";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { can } from "@/lib/auth/permissions";
 import { requireSession } from "@/lib/auth/session";
 import { isModelConfigured } from "@/modules/ai/orchestrator";
 import { countUnread } from "@/modules/notifications/service";
@@ -44,7 +45,10 @@ export default async function AppLayout({
               <main className="flex-1 overflow-y-auto">{children}</main>
             </div>
 
-            <AIPanel modelConfigured={isModelConfigured()} />
+            <AIPanel
+              modelConfigured={isModelConfigured()}
+              canGenerate={can(session.role, "ai.generate")}
+            />
           </StudioTheme>
           <Toaster />
         </AIPanelProvider>

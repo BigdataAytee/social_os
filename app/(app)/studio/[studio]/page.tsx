@@ -76,8 +76,10 @@ export default async function StudioPage({ params }: Params) {
 
       <StudioShell
         studio={studio}
+        canCreate={can(session.role, "post.create")}
         canApprove={can(session.role, "post.approve")}
         canPublish={can(session.role, "post.publish")}
+        canWriteIdeas={can(session.role, "idea.write")}
         modelConfigured={isModelConfigured()}
         data={{
           posts: posts.map((p) => ({

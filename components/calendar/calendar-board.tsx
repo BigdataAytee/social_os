@@ -60,7 +60,19 @@ const STATUS_FILTERS: { value: PostStatus | "ALL"; label: string }[] = [
   { value: PostStatus.PUBLISHED, label: "Published" },
 ];
 
-export function CalendarBoard({ posts }: { posts: CalendarPost[] }) {
+/** Published posts are immovable in the service, so they don't offer a grip. */
+function isMovable(post: CalendarPost, canEdit: boolean) {
+  return canEdit && post.status !== PostStatus.PUBLISHED;
+}
+
+export function CalendarBoard({
+  posts,
+  canEdit,
+}: {
+  posts: CalendarPost[];
+  /** False for a VIEWER, whose every drop the service would reject. */
+  canEdit: boolean;
+}) {
   const [month, setMonth] = useState(() => new Date());
   const [platform, setPlatform] = useState<Platform | "ALL">("ALL");
   const [status, setStatus] = useState<PostStatus | "ALL">("ALL");
@@ -120,6 +132,11 @@ export function CalendarBoard({ posts }: { posts: CalendarPost[] }) {
 
     const post = items.find((p) => p.id === postId);
     if (!post) return;
+
+    // Belt and braces: these cards aren't draggable, but a drop that the
+    // service is certain to reject must never reach the optimistic update —
+    // it would move the card and snap it back with an error.
+    if (!isMovable(post, canEdit)) return;
 
     // Keep the existing time of day; only the date moves.
     const existing = post.scheduledAt ? new Date(post.scheduledAt) : new Date();
@@ -220,6 +237,7 @@ export function CalendarBoard({ posts }: { posts: CalendarPost[] }) {
                   posts={visible.filter(
                     (p) => p.scheduledAt && isSameDay(new Date(p.scheduledAt), day)
                   )}
+                  canEdit={canEdit}
                 />
               ))}
             </div>
@@ -237,7 +255,12 @@ export function CalendarBoard({ posts }: { posts: CalendarPost[] }) {
             </p>
             <div className="flex flex-wrap gap-2">
               {unscheduled.map((post) => (
-                <DraggablePost key={post.id} post={post} standalone />
+                <DraggablePost
+                  key={post.id}
+                  post={post}
+                  standalone
+                  movable={isMovable(post, canEdit)}
+                />
               ))}
             </div>
           </div>
@@ -286,10 +309,12 @@ function DayCell({
   day,
   month,
   posts,
+  canEdit,
 }: {
   day: Date;
   month: Date;
   posts: CalendarPost[];
+  canEdit: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: day.toISOString() });
   const outside = !isSameMonth(day, month);
@@ -312,7 +337,11 @@ function DayCell({
         {format(day, "d")}
       </span>
       {posts.map((post) => (
-        <DraggablePost key={post.id} post={post} />
+        <DraggablePost
+          key={post.id}
+          post={post}
+          movable={isMovable(post, canEdit)}
+        />
       ))}
     </div>
   );
@@ -320,19 +349,23 @@ function DayCell({
 
 function DraggablePost({
   post,
+  movable,
   standalone = false,
 }: {
   post: CalendarPost;
+  /** When false the card still renders, it just has no grip. */
+  movable: boolean;
   standalone?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
-    useDraggable({ id: post.id });
+    useDraggable({ id: post.id, disabled: !movable });
 
   return (
     <button
       ref={setNodeRef}
-      {...listeners}
+      {...(movable ? listeners : {})}
       {...attributes}
+      disabled={!movable}
       style={
         transform
           ? {
@@ -342,7 +375,10 @@ function DraggablePost({
           : undefined
       }
       className={cn(
-        "flex cursor-grab flex-col gap-1 rounded-sm border border-border bg-surface p-1.5 text-left transition-colors hover:border-border-strong active:cursor-grabbing",
+        "flex flex-col gap-1 rounded-sm border border-border bg-surface p-1.5 text-left transition-colors",
+        movable
+          ? "cursor-grab hover:border-border-strong active:cursor-grabbing"
+          : "cursor-default",
         standalone && "w-56",
         isDragging && "opacity-70 shadow-lg shadow-black/40"
       )}

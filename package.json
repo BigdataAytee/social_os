@@ -13,6 +13,7 @@
     "db:seed": "prisma db seed",
     "db:reset": "prisma migrate reset",
     "db:studio": "prisma studio",
+    "smoke": "tsx scripts/smoke.ts",
     "postinstall": "prisma generate",
     "setup": "prisma migrate deploy && prisma db seed"
   },
