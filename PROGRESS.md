@@ -220,3 +220,27 @@ safety net but is no longer the normal path.
   same Radix packages. `npx shadcn@2 add <component>` works normally elsewhere.
   Not started, deliberately: everything in Phase 1 and beyond. Dashboard and all
   other pages are placeholders that name what belongs there and which phase owns it.
+
+
+---
+
+## Connected accounts (post-Phase 8)
+
+Not one of the original §13 phases — added after the checklist, on request.
+
+- [x] OAuth 2.0 connect flow for X, TikTok, Instagram, Facebook and YouTube
+      (PKCE where the platform requires it, signed state + httpOnly nonce cookie)
+- [x] Tokens encrypted at rest (AES-256-GCM) in `platform_credentials`,
+      refreshed ahead of expiry, deleted on disconnect
+- [x] `LiveAdapter` pulls recent posts and engagement per platform;
+      registry falls back to `MockAdapter` for any platform without credentials
+- [x] `ExternalPost` stores pulled posts, upserted so re-syncs update rather than duplicate
+- [x] `modules/insights` derives format, timing, length and topic performance
+      plus top posts, in engagement rate, with a minimum sample per bucket
+- [x] `generateIdeasFromAccount` in the orchestrator, exposed as an assistant tool
+- [x] Account row and "Analyze my account" panel in every Studio
+- [ ] **Unexercised against the real platform APIs.** The full flow is verified
+      end to end against `scripts/fake-platform.ts` (51 checks), but no request
+      has been made to X, TikTok, Meta or Google — the build environment has no
+      egress to them and no developer app exists. Register the apps, set the
+      credentials, connect one account, and close this box.

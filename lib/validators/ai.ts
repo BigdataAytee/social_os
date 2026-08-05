@@ -21,6 +21,9 @@ export const GENERATION_TYPES = [
   "comment",
   "repurpose",
   "chat",
+  // Ideas derived from a connected account's own performance data, as opposed
+  // to "idea", which works from a prompt alone.
+  "account-ideas",
 ] as const;
 
 export type GenerationType = (typeof GENERATION_TYPES)[number];
@@ -44,6 +47,17 @@ export const chatSchema = z.object({
     .min(1),
   studio: z.nativeEnum(Platform).nullable().default(null),
 });
+
+export const accountIdeasSchema = z.object({
+  studio: z.nativeEnum(Platform),
+  /** Analysis window. Shorter reacts faster; longer is steadier. */
+  days: z.number().int().min(7).max(365).default(90),
+  count: z.number().int().min(1).max(10).default(5),
+  /** Optional steer, e.g. "we're launching a course next month". */
+  context: z.string().max(2000).optional(),
+});
+
+export type AccountIdeasInput = z.input<typeof accountIdeasSchema>;
 
 export const repurposeSchema = z.object({
   input: z.string().min(1).max(4000),

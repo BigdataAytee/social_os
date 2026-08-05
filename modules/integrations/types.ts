@@ -30,9 +30,40 @@ export type Snapshot = {
   clicks: number;
 };
 
+/**
+ * One post as the platform reports it, normalised across all five.
+ *
+ * `mediaType` is the deliberate normalisation: TikTok has only videos, X calls
+ * them "media attachments", YouTube has nothing else, and Instagram
+ * distinguishes REELS from CAROUSEL_ALBUM. Collapsing them to four values is
+ * what lets insights compare formats across platforms instead of per-platform
+ * vocabularies that can't be aggregated.
+ */
+export type ExternalPostData = {
+  externalId: string;
+  permalink: string | null;
+  text: string;
+  mediaType: "video" | "image" | "carousel" | "text";
+  publishedAt: Date;
+  likes: number;
+  comments: number;
+  shares: number;
+  views: number;
+  /** Platform-specific extras — saves, watch time, click-throughs. */
+  metrics: Record<string, number>;
+};
+
 export interface PlatformAdapter {
   platform: Platform;
   publish(post: Post): Promise<PublishResult>;
   fetchAnalytics(accountId: string, since: Date): Promise<Snapshot[]>;
   fetchTrends(): Promise<Trend[]>;
+  /**
+   * Recent posts with the metrics the platform reports for each.
+   *
+   * Added for the connected-account feature: AnalyticsSnapshot's daily rollups
+   * can say engagement rose, but not which post caused it or what format it
+   * was, and both are what idea generation needs.
+   */
+  fetchPosts(accountId: string, since: Date): Promise<ExternalPostData[]>;
 }

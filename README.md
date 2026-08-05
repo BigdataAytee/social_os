@@ -102,6 +102,19 @@ checks the connection on each authenticated request and redirects to `/setup`
 when the database is missing, unreachable, or un-migrated — so a bad
 `DIRECT_URL` shows you which of those it is instead of a 500.
 
+`/setup` also catches a database that is *behind* the code — some migrations
+applied, this build's newest one not. Nothing else notices that: the tables the
+health check touches are the oldest ones, so they exist in every version of the
+schema, and the app looks fine until a page queries a column the missing
+migration adds. **Preview deployments are the usual way to get there**, because
+`prepare-database.ts` deliberately refuses to migrate from one. `/setup` names
+the pending migrations by filename.
+
+Any error that still escapes lands on a real boundary (`app/(app)/error.tsx`)
+that shows the digest — the one string tying the screen to the server log — and
+names the failures worth checking first, instead of Next's bare "a server-side
+exception has occurred".
+
 `/setup` shows the error the database actually returned (password redacted),
 the host and port it tried, and anything wrong it can see in the connection
 strings without connecting — surrounding quotes pasted into Vercel, an
@@ -147,6 +160,7 @@ app but an unnecessary hazard for migrations and a write-heavy seed. In Vercel,
 | `npm run db:reset` | Drop, re-migrate and re-seed |
 | `npm run db:studio` | Prisma Studio |
 | `npm run smoke` | Service-layer suite against a seeded throwaway database |
+| `npm run smoke:oauth` | Connect flow, token refresh, sync and insights against a fake platform |
 
 ## Layout
 
@@ -167,6 +181,44 @@ Design tokens live in `styles/tokens.css` and are exposed through
 `text-secondary`, `text-accent` and the per-Studio accents (`bg-studio-tiktok`,
 `text-studio-youtube`, …). No component hardcodes a color.
 
+## Connecting real accounts
+
+Each Studio has an **Account** row at the top. Connect there and SocialOS pulls
+that account's recent posts and their engagement, then the **Ideas** tab can
+analyse them: which formats, posting slots, lengths and topics actually
+outperform, with the ideas written from those patterns rather than from a blank
+page. The assistant gets the same capability as a `generateIdeasFromAccount`
+tool, so "what should I post on TikTok?" works in chat too.
+
+Two things must be configured before any platform can be connected:
+
+```bash
+# 1. A key to encrypt stored tokens with (AES-256-GCM).
+openssl rand -base64 32   # → SOCIALOS_ENCRYPTION_KEY
+
+# 2. An OAuth app per platform, with this callback URL registered:
+#    <SOCIALOS_PUBLIC_URL>/api/oauth/<x|tiktok|instagram|facebook|youtube>/callback
+```
+
+| Platform | Variables | Console |
+| --- | --- | --- |
+| X | `X_CLIENT_ID` / `X_CLIENT_SECRET` | developer.x.com |
+| TikTok | `TIKTOK_CLIENT_KEY` / `TIKTOK_CLIENT_SECRET` | developers.tiktok.com |
+| YouTube | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | console.cloud.google.com |
+| Instagram + Facebook | `META_CLIENT_ID` / `META_CLIENT_SECRET` | developers.facebook.com |
+
+A platform with no credentials keeps the mock adapter — its Studio works
+normally and simply reports "not connected", naming the variables it needs.
+Instagram and Facebook share one Meta app; Instagram needs a Business account
+linked to a Facebook Page, because that's the only way its insights are exposed.
+
+Scopes are **read-only**. This pulls data; it does not post. Publishing still
+goes through the mock adapter, unchanged.
+
+Tokens are encrypted at rest in `platform_credentials` and never leave the
+service layer — `withAccessToken()` hands one to a callback and never returns
+it. Disconnecting deletes the credential and keeps the pulled history.
+
 ## Checking the app
 
 `scripts/smoke.ts` drives the service layer against a real seeded database —
@@ -184,3 +236,14 @@ npm run smoke
 
 It writes — creating, rescheduling, publishing and deleting posts — so point it
 at a throwaway database, never one whose contents matter.
+
+`npm run smoke:oauth` covers the connected-account feature the same way, against
+a fake platform server (`scripts/fake-platform.ts`) that stands in for X's OAuth
+and API endpoints. It is deliberately strict — it rejects a mismatched PKCE
+verifier, a reused code, a mismatched redirect URI and a missing Basic auth
+header — so the flow is exercised rather than merely executed. No developer app
+or network access needed:
+
+```bash
+npm run smoke:oauth
+```

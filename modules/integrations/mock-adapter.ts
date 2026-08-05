@@ -1,7 +1,13 @@
 import { Platform, type Post } from "@prisma/client";
 
 import { db } from "@/lib/db";
-import type { PlatformAdapter, PublishResult, Snapshot, Trend } from "./types";
+import type {
+  ExternalPostData,
+  PlatformAdapter,
+  PublishResult,
+  Snapshot,
+  Trend,
+} from "./types";
 
 /**
  * The v1 adapter for every platform (ARCHITECTURE.md §10).
@@ -117,5 +123,77 @@ export class MockAdapter implements PlatformAdapter {
         };
       })
       .sort((a, b) => b.volume - a.volume);
+  }
+
+  /**
+   * Derived from the org's own published posts rather than invented, so a demo
+   * org's insights describe content that actually exists in the app and the
+   * numbers move with the seeded analytics. Engagement is apportioned from the
+   * day's snapshot, which keeps the mock and a real pull the same shape.
+   */
+  async fetchPosts(accountId: string, since: Date): Promise<ExternalPostData[]> {
+    const account = await db.connectedAccount.findUnique({
+      where: { id: accountId },
+      select: { orgId: true },
+    });
+    if (!account) return [];
+
+    const [posts, snapshots] = await Promise.all([
+      db.post.findMany({
+        where: {
+          orgId: account.orgId,
+          platform: this.platform,
+          status: "PUBLISHED",
+          publishedAt: { gte: since },
+        },
+        orderBy: { publishedAt: "desc" },
+        take: 50,
+      }),
+      db.analyticsSnapshot.findMany({
+        where: { accountId, date: { gte: since } },
+      }),
+    ]);
+
+    const byDay = new Map(
+      snapshots.map((s) => [s.date.toISOString().slice(0, 10), s])
+    );
+
+    return posts
+      .filter((post): post is typeof post & { publishedAt: Date } =>
+        Boolean(post.publishedAt)
+      )
+      .map((post) => {
+        const day = post.publishedAt.toISOString().slice(0, 10);
+        const snapshot = byDay.get(day);
+        const seed = hash(`${this.platform}:${post.id}`);
+
+        // A share of that day's engagement, weighted by a per-post seed so the
+        // ordering is stable across reloads but not uniform.
+        const engagement = Math.round((snapshot?.engagement ?? 400) * (0.15 + seed * 0.5));
+        const views = Math.round((snapshot?.impressions ?? 5_000) * (0.1 + seed * 0.4));
+
+        const platformData = post.platformData as Record<string, unknown>;
+        const mediaType: ExternalPostData["mediaType"] =
+          this.platform === Platform.TIKTOK || this.platform === Platform.YOUTUBE
+            ? "video"
+            : Array.isArray(platformData?.slides)
+              ? "carousel"
+              : Array.isArray(platformData?.media) && platformData.media.length > 0
+                ? "image"
+                : "text";
+
+        return {
+          externalId: `mock_${post.id.slice(-12)}`,
+          permalink: `https://example.com/${this.platform.toLowerCase()}/${post.id.slice(-12)}`,
+          text: post.body,
+          mediaType,
+          publishedAt: post.publishedAt,
+          likes: Math.round(engagement * 0.72),
+          comments: Math.round(engagement * 0.14),
+          shares: Math.round(engagement * 0.14),
+          views,
+          metrics: { saves: Math.round(engagement * 0.08) },
+        };
+      });
   }
 }

@@ -4,10 +4,19 @@ import { z } from "zod";
 import { assertCan } from "@/lib/auth/permissions";
 import type { Session } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { generateSchema, type GenerationType } from "@/lib/validators/ai";
+import {
+  accountIdeasSchema,
+  generateSchema,
+  type GenerationType,
+} from "@/lib/validators/ai";
 import { CHARACTER_LIMITS } from "@/lib/validators/platform-data";
 import { getBrandVoice } from "@/modules/brandvoice/service";
 import { createIdea, listIdeas } from "@/modules/ideas/service";
+import {
+  describeInsights,
+  getAccountInsights,
+  type AccountInsights,
+} from "@/modules/insights/service";
 import { createPost, updatePost } from "@/modules/posts/service";
 import { systemPrompt, userPrompt } from "./prompts";
 import {
@@ -146,6 +155,89 @@ export async function repurpose(
   return results;
 }
 
+export type AccountIdeasResult = {
+  ideas: string[];
+  insights: AccountInsights;
+  source: ProviderSource;
+  generationId: string;
+};
+
+/**
+ * Ideas derived from a connected account's own performance.
+ *
+ * The distinction from `generate({ type: "idea" })` is the input: that one works
+ * from a prompt, this one works from what the account actually published and how
+ * it did. The analysis happens in modules/insights — the model is handed a
+ * finished report and asked to act on it, rather than being handed raw rows and
+ * trusted to do arithmetic.
+ */
+export async function generateIdeasFromAccount(
+  session: Session,
+  input: z.input<typeof accountIdeasSchema>
+): Promise<AccountIdeasResult> {
+  assertCan(session.role, "ai.generate");
+  const data = accountIdeasSchema.parse(input);
+
+  const insights = await getAccountInsights(session, {
+    platform: data.studio,
+    days: data.days,
+  });
+
+  // Nothing synced, or too few posts for any bucket to clear its threshold.
+  // Returning early beats asking the model to find patterns in three posts,
+  // which it will do, convincingly and wrongly.
+  if (insights.thin) {
+    return { ideas: [], insights, source: "local", generationId: "" };
+  }
+
+  const report = describeInsights(insights);
+  const result = await complete({
+    system: await context(session, data.studio),
+    messages: [
+      {
+        role: "user",
+        content: userPrompt({
+          type: "account-ideas",
+          input: report,
+          context: [
+            `Generate exactly ${data.count} ideas.`,
+            data.context,
+          ]
+            .filter(Boolean)
+            .join(" "),
+        }),
+      },
+    ],
+  });
+
+  const row = await db.aIGeneration.create({
+    data: {
+      orgId: session.orgId,
+      userId: session.userId,
+      studio: data.studio,
+      type: "account-ideas",
+      input: report,
+      output: result.text,
+    },
+  });
+
+  return {
+    ideas: splitIdeas(result.text, data.count),
+    insights,
+    source: result.source,
+    generationId: row.id,
+  };
+}
+
+/** One idea per line, tolerating the numbering and bullets models add anyway. */
+function splitIdeas(text: string, limit: number): string[] {
+  return text
+    .split("\n")
+    .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim())
+    .filter((line) => line.length > 8)
+    .slice(0, limit);
+}
+
 // ------------------------------------------------------------- tool calling
 
 const TOOLS: ToolSpec[] = [
@@ -208,6 +300,30 @@ const TOOLS: ToolSpec[] = [
         content: { type: "string" },
       },
       required: ["platform", "content"],
+    },
+  },
+  {
+    name: "generateIdeasFromAccount",
+    description:
+      "Analyse a connected account's real performance data — top posts, which formats and posting times work, which topics outperform — and produce content ideas grounded in it. Use this whenever the person asks what they should post, what's working, or why something did well. Prefer it over inventing ideas from nothing when the account is connected.",
+    input_schema: {
+      type: "object",
+      properties: {
+        platform: {
+          type: "string",
+          enum: Object.values(Platform),
+          description: "Which connected account to analyse",
+        },
+        days: {
+          type: "number",
+          description: "How far back to analyse. Defaults to 90.",
+        },
+        count: {
+          type: "number",
+          description: "How many ideas to return. Defaults to 5.",
+        },
+      },
+      required: ["platform"],
     },
   },
   {
@@ -337,6 +453,42 @@ async function runTool(
         source: "ai",
       });
       return { name, summary: "saved an idea", postIds: [] };
+    }
+
+    case "generateIdeasFromAccount": {
+      const result = await generateIdeasFromAccount(session, {
+        studio: input.platform as Platform,
+        days: typeof input.days === "number" ? input.days : undefined,
+        count: typeof input.count === "number" ? input.count : undefined,
+      });
+
+      if (result.insights.sampleSize === 0) {
+        return {
+          name,
+          summary: `no posts have been pulled from ${input.platform} yet — connect the account in that Studio first`,
+          postIds: [],
+        };
+      }
+      if (result.insights.thin) {
+        return {
+          name,
+          summary: `only ${result.insights.sampleSize} posts pulled from ${input.platform} — too few to find a reliable pattern`,
+          postIds: [],
+        };
+      }
+
+      // The report goes back to the model, not just the ideas: the next turn is
+      // usually "why?", and without the numbers it would have to invent them.
+      return {
+        name,
+        summary: [
+          describeInsights(result.insights),
+          "",
+          "Ideas generated:",
+          ...result.ideas.map((idea) => `- ${idea}`),
+        ].join("\n"),
+        postIds: [],
+      };
     }
 
     case "listIdeas": {

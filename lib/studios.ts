@@ -145,4 +145,13 @@ export function studioForPlatform(platform: Platform): Studio {
   return BY_PLATFORM.get(platform)!;
 }
 
+/**
+ * Slug → Platform for route segments that aren't Studio pages — the OAuth
+ * callbacks, whose URLs are registered with each platform's developer console
+ * and so must stay lowercase and stable.
+ */
+export function parsePlatformSlug(slug: string): Platform | null {
+  return BY_SLUG.get(slug.toLowerCase() as StudioSlug)?.platform ?? null;
+}
+
 export const STUDIO_SLUGS = STUDIOS.map((s) => s.slug);

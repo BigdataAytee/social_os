@@ -25,7 +25,14 @@ export type DatabaseStatus =
   /** Configured, but the server refused, timed out, or rejected our credentials. */
   | "unreachable"
   /** Reachable, but `prisma migrate deploy` has never succeeded against it. */
-  | "not-migrated";
+  | "not-migrated"
+  /**
+   * Migrated, but behind this build: the code expects migrations the database
+   * hasn't got. Distinct from "not-migrated" because the tables the health
+   * check itself touches all exist — the app looks fine right up until a page
+   * queries a column added by the missing migration.
+   */
+  | "schema-outdated";
 
 export type DatabaseHealth = {
   status: DatabaseStatus;
@@ -35,6 +42,8 @@ export type DatabaseHealth = {
   code?: string;
   /** Problems visible in the connection strings themselves. */
   hints: string[];
+  /** Migrations this build ships that the database hasn't applied. */
+  pendingMigrations?: string[];
 };
 
 /** Prisma's code for "relation does not exist". */
@@ -219,6 +228,52 @@ export function inspectConnectionStrings(
   return hints;
 }
 
+/**
+ * Migrations this build ships that the database hasn't applied.
+ *
+ * Exists because a database can be *behind* the code rather than empty, and
+ * nothing else notices. The common way to get there is a preview deployment:
+ * scripts/prepare-database.ts deliberately refuses to migrate from a preview
+ * build (previews share production's environment variables, so migrating from
+ * one would alter the production database), which means a preview whose branch
+ * adds a migration runs new code against an old schema. Every page that touches
+ * the changed table then dies with Prisma P2022 and an opaque digest.
+ *
+ * Compares the migration folders shipped in the build against the rows Prisma
+ * records in `_prisma_migrations`. Any failure to read either side returns
+ * empty — an inconclusive check must never manufacture a problem, because the
+ * cost of a false positive here is locking a working app out of its own pages.
+ */
+async function pendingMigrations(): Promise<string[]> {
+  let shipped: string[];
+  try {
+    const { readdirSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    shipped = readdirSync(join(process.cwd(), "prisma", "migrations"), {
+      withFileTypes: true,
+    })
+      .filter((entry) => entry.isDirectory() && /^\d{14}_/.test(entry.name))
+      .map((entry) => entry.name);
+  } catch {
+    // The folder isn't in the deployment bundle (see next.config.mjs) or we're
+    // somewhere without a filesystem. Can't compare; don't guess.
+    return [];
+  }
+  if (shipped.length === 0) return [];
+
+  try {
+    const applied = await db.$queryRaw<{ migration_name: string }[]>`
+      SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL
+    `;
+    const done = new Set(applied.map((row) => row.migration_name));
+    return shipped.filter((name) => !done.has(name)).sort();
+  } catch {
+    // No _prisma_migrations table means the schema was applied by hand rather
+    // than by `migrate deploy`. That is a legitimate setup, not a fault.
+    return [];
+  }
+}
+
 export const getDatabaseHealth = cache(async (): Promise<DatabaseHealth> => {
   const hints = inspectConnectionStrings();
 
@@ -234,6 +289,15 @@ export const getDatabaseHealth = cache(async (): Promise<DatabaseHealth> => {
 
   try {
     await db.organization.count();
+
+    // The tables this check touches are the oldest ones, so they exist in every
+    // version of the schema. That is exactly why passing them proves nothing
+    // about whether the database matches *this build*.
+    const pending = await pendingMigrations();
+    if (pending.length > 0) {
+      return { status: "schema-outdated", hints, pendingMigrations: pending };
+    }
+
     return { status: "ok", hints };
   } catch (error) {
     // A missing table means the connection is fine but migrations haven't run.
@@ -260,4 +324,6 @@ export const DATABASE_STATUS_MESSAGE: Record<
     "The database is configured but wouldn't accept a connection. What it returned is below.",
   "not-migrated":
     "The database is reachable but has no tables — migrations haven't run against it yet. The next deploy will apply them, or run `npm run setup` against it directly.",
+  "schema-outdated":
+    "The database is reachable, but this deployment's code expects migrations it hasn't got. Pages would fail on the tables those migrations change, so they aren't rendered.",
 };

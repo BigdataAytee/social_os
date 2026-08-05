@@ -332,6 +332,30 @@ function DatabaseNotice({
         </p>
       )}
 
+      {health.pendingMigrations && health.pendingMigrations.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <p className="font-mono text-[10px] uppercase tracking-wider text-muted">
+            Not applied
+          </p>
+          <ul className="flex flex-col gap-0.5">
+            {health.pendingMigrations.map((name) => (
+              <li
+                key={name}
+                className="font-mono text-[11px] text-secondary"
+              >
+                {name}
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-muted">
+            A production deploy applies these automatically. Preview deployments
+            never do — they share production&rsquo;s environment variables, so
+            migrating from one would alter the production database. If this is a
+            preview, use the production URL or merge the branch.
+          </p>
+        </div>
+      )}
+
       {status === "not-migrated" && deployed && (
         <p className="text-xs text-muted">
           Check the last build log for a line beginning{" "}
