@@ -102,6 +102,13 @@ checks the connection on each authenticated request and redirects to `/setup`
 when the database is missing, unreachable, or un-migrated — so a bad
 `DIRECT_URL` shows you which of those it is instead of a 500.
 
+`/setup` shows the error the database actually returned (password redacted),
+the host and port it tried, and anything wrong it can see in the connection
+strings without connecting — surrounding quotes pasted into Vercel, an
+unencoded `@` in the password, `DIRECT_URL` on the pooled port 6543, a pooled
+`DATABASE_URL` missing `?pgbouncer=true`. "Unreachable" otherwise covers a
+wrong password, a paused Supabase project and a malformed URL with one word.
+
 `npm run build` deliberately stays database-free, so local builds and CI need no
 credentials. Only `vercel-build` touches the database.
 

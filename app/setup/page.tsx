@@ -4,8 +4,8 @@ import type { Metadata } from "next";
 import { Logo } from "@/components/shell/logo";
 import {
   DATABASE_STATUS_MESSAGE,
-  checkDatabase,
-  type DatabaseStatus,
+  getDatabaseHealth,
+  type DatabaseHealth,
 } from "@/lib/db-health";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 
@@ -62,16 +62,16 @@ const DEPLOYED_STEPS: Step[] = [
       "DATABASE_URL and DIRECT_URL (Project Settings \u2192 Database), NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY (Project Settings \u2192 API).",
   },
   {
-    title: "Set up the database",
-    code: 'DATABASE_URL="\u2026" DIRECT_URL="\u2026" npm run setup',
-    detail:
-      "Run this once from your machine against the Supabase database. Deploys do not migrate automatically.",
-  },
-  {
-    title: "Redeploy, then sign up",
+    title: "Redeploy",
     code: "Deployments \u2192 \u22ef \u2192 Redeploy",
     detail:
-      "Environment variables are read at build and boot. Then create an account with any email \u2014 you'll land in the demo organization with data already in it.",
+      "Environment variables are read at build and at boot, so a deployment that was built without them keeps behaving as if they're missing until it is replaced.",
+  },
+  {
+    title: "Sign up",
+    code: "/signup",
+    detail:
+      "The redeploy applies the migrations and, into an empty database, loads the demo organization. Then create an account with any email \u2014 you'll land in it with data already there.",
   },
 ];
 
@@ -90,12 +90,12 @@ const REQUIRED_VARS = [
  */
 export default async function SetupPage() {
   const supabaseReady = isSupabaseConfigured();
-  const database = await checkDatabase();
+  const database = await getDatabaseHealth();
 
   // Only leave once both halves actually work. Redirecting on Supabase config
   // alone would bounce straight back here from requireSession when the database
   // is the broken half — a loop.
-  if (supabaseReady && database === "ok") redirect("/dashboard");
+  if (supabaseReady && database.status === "ok") redirect("/dashboard");
 
   const deployed = Boolean(process.env.VERCEL);
   const steps = deployed ? DEPLOYED_STEPS : LOCAL_STEPS;
@@ -126,9 +126,7 @@ export default async function SetupPage() {
             </p>
           </div>
 
-          {database !== "ok" && (
-            <DatabaseNotice status={database} deployed={deployed} />
-          )}
+          <DatabaseNotice health={database} deployed={deployed} />
 
           {missing.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-surface px-4 py-3">
@@ -180,17 +178,23 @@ export default async function SetupPage() {
 }
 
 /**
- * The specific database failure, stated plainly. This is the difference between
- * "something is wrong" and knowing whether to fix a URL or run migrations.
+ * The specific database failure, stated plainly, with the error the database
+ * itself returned. The status word alone ("unreachable") covers a wrong
+ * password, a paused project and a malformed URL — three different fixes — so
+ * the detail line below is the part that actually ends the guessing.
  */
 function DatabaseNotice({
-  status,
+  health,
   deployed,
 }: {
-  status: Exclude<DatabaseStatus, "ok">;
+  health: DatabaseHealth;
   deployed: boolean;
 }) {
+  const { status, detail, code, hints } = health;
+  if (status === "ok") return null;
+
   const critical = status !== "unconfigured";
+  const target = databaseTarget();
 
   return (
     <div
@@ -206,21 +210,55 @@ function DatabaseNotice({
         }`}
       >
         Database &mdash; {status.replace("-", " ")}
+        {code ? ` · ${code}` : ""}
       </p>
-      <p className="text-sm text-secondary">
-        {DATABASE_STATUS_MESSAGE[status]}
-      </p>
+      <p className="text-sm text-secondary">{DATABASE_STATUS_MESSAGE[status]}</p>
+
+      {detail && (
+        <p className="overflow-x-auto rounded-sm border border-border bg-surface-raised px-3 py-2 font-mono text-[11px] leading-relaxed text-secondary">
+          {detail}
+        </p>
+      )}
+
+      {hints.length > 0 && (
+        <ul className="flex list-disc flex-col gap-1 pl-4 text-xs text-muted">
+          {hints.map((hint) => (
+            <li key={hint}>{hint}</li>
+          ))}
+        </ul>
+      )}
+
+      {/* Confirms which database this deployment is actually pointed at, which
+          is the fastest way to notice the variable was set on another project
+          or in another environment. Host and port only — never credentials. */}
+      {target && (
+        <p className="text-xs text-muted">
+          Pointing at{" "}
+          <code className="font-mono text-[11px] text-secondary">{target}</code>
+        </p>
+      )}
+
       {status === "not-migrated" && deployed && (
         <p className="text-xs text-muted">
           Check the last build log for a line beginning{" "}
           <code className="font-mono text-[11px] text-secondary">
             ⚠ Migrations did not run
           </code>{" "}
-          &mdash; it carries the error the database returned. The usual cause is{" "}
-          <code className="font-mono text-[11px] text-secondary">DIRECT_URL</code>{" "}
-          pointing at the pooled port 6543 rather than 5432.
+          &mdash; it carries the error the database returned.
         </p>
       )}
     </div>
   );
+}
+
+/** Host and port of DATABASE_URL, or null if it isn't set or isn't parseable. */
+function databaseTarget(): string | null {
+  const value = process.env.DATABASE_URL?.trim();
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return `${url.hostname}:${url.port || "5432"}`;
+  } catch {
+    return null;
+  }
 }
