@@ -102,6 +102,19 @@ checks the connection on each authenticated request and redirects to `/setup`
 when the database is missing, unreachable, or un-migrated — so a bad
 `DIRECT_URL` shows you which of those it is instead of a 500.
 
+`/setup` also catches a database that is *behind* the code — some migrations
+applied, this build's newest one not. Nothing else notices that: the tables the
+health check touches are the oldest ones, so they exist in every version of the
+schema, and the app looks fine until a page queries a column the missing
+migration adds. **Preview deployments are the usual way to get there**, because
+`prepare-database.ts` deliberately refuses to migrate from one. `/setup` names
+the pending migrations by filename.
+
+Any error that still escapes lands on a real boundary (`app/(app)/error.tsx`)
+that shows the digest — the one string tying the screen to the server log — and
+names the failures worth checking first, instead of Next's bare "a server-side
+exception has occurred".
+
 `/setup` shows the error the database actually returned (password redacted),
 the host and port it tried, and anything wrong it can see in the connection
 strings without connecting — surrounding quotes pasted into Vercel, an
