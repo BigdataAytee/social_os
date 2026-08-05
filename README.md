@@ -146,6 +146,7 @@ app but an unnecessary hazard for migrations and a write-heavy seed. In Vercel,
 | `npm run db:seed` | Re-seed the demo org |
 | `npm run db:reset` | Drop, re-migrate and re-seed |
 | `npm run db:studio` | Prisma Studio |
+| `npm run smoke` | Service-layer suite against a seeded throwaway database |
 
 ## Layout
 
@@ -165,3 +166,21 @@ Design tokens live in `styles/tokens.css` and are exposed through
 `tailwind.config.ts` as `bg-canvas`, `bg-surface`, `text-primary`,
 `text-secondary`, `text-accent` and the per-Studio accents (`bg-studio-tiktok`,
 `text-studio-youtube`, …). No component hardcodes a color.
+
+## Checking the app
+
+`scripts/smoke.ts` drives the service layer against a real seeded database —
+every read the pages make, the approval gate, the publish and reschedule rules,
+and cross-org isolation. The pages are thin, so a bug that would break a page
+breaks this first, without needing Supabase Auth or a browser.
+
+```bash
+createdb socialos
+export DATABASE_URL="postgresql://postgres@127.0.0.1:5432/socialos"
+export DIRECT_URL="$DATABASE_URL"
+npx prisma migrate deploy && npx tsx prisma/seed.ts
+npm run smoke
+```
+
+It writes — creating, rescheduling, publishing and deleting posts — so point it
+at a throwaway database, never one whose contents matter.

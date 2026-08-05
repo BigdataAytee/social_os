@@ -62,7 +62,13 @@ export function AIPanelToggle() {
 const MIN_WIDTH = 300;
 const MAX_WIDTH = 640;
 
-export function AIPanel({ modelConfigured }: { modelConfigured: boolean }) {
+export function AIPanel({
+  modelConfigured,
+  canGenerate,
+}: {
+  modelConfigured: boolean;
+  canGenerate: boolean;
+}) {
   const { open } = useAIPanel();
   const [width, setWidth] = useState(380);
   const dragging = useRef(false);
@@ -114,7 +120,13 @@ export function AIPanel({ modelConfigured }: { modelConfigured: boolean }) {
           className="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize bg-transparent transition-colors hover:bg-accent/40"
         />
       )}
-      {open && <AssistantChat modelConfigured={modelConfigured} compact />}
+      {open && (
+        <AssistantChat
+          modelConfigured={modelConfigured}
+          canGenerate={canGenerate}
+          compact
+        />
+      )}
     </aside>
   );
 }

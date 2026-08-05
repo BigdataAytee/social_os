@@ -33,9 +33,12 @@ const SUGGESTIONS = [
 
 export function AssistantChat({
   modelConfigured,
+  canGenerate,
   compact = false,
 }: {
   modelConfigured: boolean;
+  /** False for a VIEWER — the orchestrator refuses every call from them. */
+  canGenerate: boolean;
   compact?: boolean;
 }) {
   const router = useRouter();
@@ -169,7 +172,7 @@ export function AssistantChat({
               rows.
             </p>
             <div className="flex flex-col gap-2">
-              {SUGGESTIONS.map((s) => (
+              {canGenerate && SUGGESTIONS.map((s) => (
                 <button
                   key={s}
                   type="button"
@@ -235,6 +238,13 @@ export function AssistantChat({
       </div>
 
       <div className="shrink-0 border-t border-border p-3">
+        {!canGenerate ? (
+          <p className="text-xs text-muted">
+            Your role is read-only, so the assistant can&rsquo;t generate or act
+            on content for you. Past generations are still visible.
+          </p>
+        ) : (
+        <>
         <div className="flex items-end gap-2">
           <Textarea
             value={input}
@@ -268,6 +278,8 @@ export function AssistantChat({
           <Sparkles />
           Repurpose into everything
         </Button>
+        </>
+        )}
       </div>
     </div>
   );

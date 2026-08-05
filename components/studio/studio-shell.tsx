@@ -57,26 +57,34 @@ const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 export function StudioShell({
   studio,
   data,
+  canCreate,
   canApprove,
   canPublish,
+  canWriteIdeas,
   modelConfigured,
 }: {
   studio: Studio;
   data: StudioShellData;
+  /** False for a VIEWER — the composer and the AI box would only ever fail. */
+  canCreate: boolean;
   canApprove: boolean;
   canPublish: boolean;
+  canWriteIdeas: boolean;
   modelConfigured: boolean;
 }) {
   const [draft, setDraft] = useState("");
   const platform = studio.platform as Platform;
 
   return (
-    <Tabs defaultValue="create" className="flex flex-col">
+    // A read-only role opens on the queue; Create isn't theirs to see.
+    <Tabs defaultValue={canCreate ? "create" : "queue"} className="flex flex-col">
       <TabsList>
-        <TabsTrigger value="create">
-          <PenLine className="h-3.5 w-3.5" />
-          Create
-        </TabsTrigger>
+        {canCreate && (
+          <TabsTrigger value="create">
+            <PenLine className="h-3.5 w-3.5" />
+            Create
+          </TabsTrigger>
+        )}
         <TabsTrigger value="queue">
           <Inbox className="h-3.5 w-3.5" />
           Queue
@@ -103,6 +111,7 @@ export function StudioShell({
       </TabsList>
 
       {/* ------------------------------------------------------------ create */}
+      {canCreate && (
       <TabsContent value="create">
         <div className="grid gap-5 lg:grid-cols-2">
           <AIGenerateBox
@@ -120,6 +129,7 @@ export function StudioShell({
           />
         </div>
       </TabsContent>
+      )}
 
       {/* ------------------------------------------------------------- queue */}
       <TabsContent value="queue">
@@ -145,7 +155,11 @@ export function StudioShell({
 
       {/* ------------------------------------------------------------- ideas */}
       <TabsContent value="ideas">
-        <IdeaList platform={platform} ideas={data.ideas} />
+        <IdeaList
+          platform={platform}
+          ideas={data.ideas}
+          canWrite={canWriteIdeas}
+        />
       </TabsContent>
 
       {/* ------------------------------------------------------------ trends */}
@@ -329,9 +343,11 @@ export function StudioShell({
 function IdeaList({
   platform,
   ideas,
+  canWrite,
 }: {
   platform: Platform;
   ideas: { id: string; content: string; source: string | null }[];
+  canWrite: boolean;
 }) {
   const [value, setValue] = useState("");
   const [items, setItems] = useState(ideas);
@@ -358,20 +374,22 @@ function IdeaList({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex gap-2">
-        <Input
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") add();
-          }}
-          placeholder="Capture an idea before it evaporates…"
-        />
-        <Button onClick={add} disabled={pending}>
-          <Plus />
-          Add
-        </Button>
-      </div>
+      {canWrite && (
+        <div className="flex gap-2">
+          <Input
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") add();
+            }}
+            placeholder="Capture an idea before it evaporates…"
+          />
+          <Button onClick={add} disabled={pending}>
+            <Plus />
+            Add
+          </Button>
+        </div>
+      )}
 
       {items.length === 0 ? (
         <EmptyState

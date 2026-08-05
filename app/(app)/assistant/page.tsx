@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import { AssistantChat } from "@/components/assistant/assistant-chat";
 import { PageHeader } from "@/components/shell/page-placeholder";
+import { can } from "@/lib/auth/permissions";
 import { requireSession } from "@/lib/auth/session";
 import { isModelConfigured, listGenerations } from "@/modules/ai/orchestrator";
 
@@ -25,7 +26,10 @@ export default async function AssistantPage() {
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="h-[32rem] overflow-hidden rounded-lg border border-border bg-surface lg:col-span-2">
-          <AssistantChat modelConfigured={isModelConfigured()} />
+          <AssistantChat
+            modelConfigured={isModelConfigured()}
+            canGenerate={can(session.role, "ai.generate")}
+          />
         </div>
 
         <div className="flex flex-col gap-3">

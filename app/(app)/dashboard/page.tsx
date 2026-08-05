@@ -82,6 +82,7 @@ export default async function DashboardPage() {
   ]);
 
   const openTasks = tasks.filter((t) => t.status !== "DONE");
+  const canCreate = can(session.role, "post.create");
   const canApprove = can(session.role, "post.approve");
   const canPublish = can(session.role, "post.publish");
 
@@ -99,12 +100,14 @@ export default async function DashboardPage() {
                 Calendar
               </Link>
             </Button>
-            <Button asChild size="sm">
-              <Link href="/studio/x">
-                <PenLine />
-                New post
-              </Link>
-            </Button>
+            {canCreate && (
+              <Button asChild size="sm">
+                <Link href="/studio/x">
+                  <PenLine />
+                  New post
+                </Link>
+              </Button>
+            )}
           </div>
         }
       />
