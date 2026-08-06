@@ -13,7 +13,7 @@ import { Section } from "@/components/ui/section";
 import { can } from "@/lib/auth/permissions";
 import { requireSession } from "@/lib/auth/session";
 import { studioForPlatform } from "@/lib/studios";
-import { isEncryptionConfigured } from "@/lib/crypto";
+import { encryptionKeyProblem, isEncryptionConfigured } from "@/lib/crypto";
 import { isModelConfigured } from "@/modules/ai/orchestrator";
 import {
   OAUTH_PROVIDERS,
@@ -143,6 +143,11 @@ function capabilities(platforms: Platform[]): Capability[] {
     {
       name: "Encrypted credentials",
       configured: isEncryptionConfigured(),
+      // Only counts as a "problem" when the variable exists — an absent one is
+      // a missing step, not a broken value, and they read very differently.
+      problem: process.env.SOCIALOS_ENCRYPTION_KEY
+        ? encryptionKeyProblem()
+        : null,
       effect:
         "Gates every real connection on every platform. Without it, Mock is the only connection type that can be selected.",
       vars: ["SOCIALOS_ENCRYPTION_KEY"],

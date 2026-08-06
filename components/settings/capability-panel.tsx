@@ -24,10 +24,19 @@ export type Capability = {
   effect: string;
   /** The environment variable(s) behind it. */
   vars: string[];
+  /**
+   * Set when the variable is *present but rejected* — wrong length, stray
+   * quotes, truncated paste. This is the state that used to be invisible: the
+   * app reported "not set" to someone looking straight at the value in their
+   * dashboard, which reads as the app being broken rather than the value being
+   * wrong.
+   */
+  problem?: string | null;
 };
 
 export function CapabilityPanel({ capabilities }: { capabilities: Capability[] }) {
   const missing = capabilities.filter((capability) => !capability.configured);
+  const rejected = missing.filter((capability) => capability.problem);
 
   return (
     <Section
@@ -39,6 +48,13 @@ export function CapabilityPanel({ capabilities }: { capabilities: Capability[] }
           <p className="text-sm text-primary">
             Everything is configured. Real connections, AI generation and
             scheduled background work are all live.
+          </p>
+        ) : rejected.length > 0 ? (
+          <p className="text-sm text-primary">
+            {rejected.length === 1 ? "One variable is" : `${rejected.length} variables are`}{" "}
+            set but not accepted — see the red note below. The value is present;
+            it just isn&rsquo;t valid, so fixing it is an edit rather than an
+            addition.
           </p>
         ) : (
           <p className="text-sm text-muted">
@@ -69,11 +85,16 @@ export function CapabilityPanel({ capabilities }: { capabilities: Capability[] }
               <div className="min-w-0 flex-1">
                 <p className="text-sm text-primary">{capability.name}</p>
                 <p className="text-xs text-muted">{capability.effect}</p>
-                {!capability.configured && (
-                  <p className="mt-0.5 font-mono text-[10px] uppercase tracking-wider text-warning">
-                    needs {capability.vars.join(" + ")}
-                  </p>
-                )}
+                {!capability.configured &&
+                  (capability.problem ? (
+                    <p className="mt-0.5 text-[11px] leading-snug text-danger">
+                      Set, but rejected: {capability.problem}
+                    </p>
+                  ) : (
+                    <p className="mt-0.5 font-mono text-[10px] uppercase tracking-wider text-warning">
+                      needs {capability.vars.join(" + ")}
+                    </p>
+                  ))}
               </div>
             </li>
           ))}

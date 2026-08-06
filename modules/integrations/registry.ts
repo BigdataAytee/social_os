@@ -1,6 +1,6 @@
 import { IntegrationMode, Platform } from "@prisma/client";
 
-import { isEncryptionConfigured } from "@/lib/crypto";
+import { encryptionKeyProblem, isEncryptionConfigured } from "@/lib/crypto";
 import { LiveAdapter } from "./live-adapter";
 import { MockAdapter } from "./mock-adapter";
 import { OAUTH_PROVIDERS, isPlatformConfigured } from "./oauth/providers";
@@ -74,8 +74,12 @@ export type ModeAvailability = {
 
 /** Every mode's state for one platform, for the Settings selector (§4). */
 export function modeAvailability(platform: Platform): ModeAvailability[] {
-  const noKey = !isEncryptionConfigured()
-    ? "SOCIALOS_ENCRYPTION_KEY isn't set, so a real connection's credentials couldn't be stored safely."
+  // The specific problem, not a generic "isn't set" — the key may well be set
+  // and simply the wrong length, and telling someone it's missing when they can
+  // see it in their dashboard costs them the afternoon.
+  const keyProblem = encryptionKeyProblem();
+  const noKey = keyProblem
+    ? `${keyProblem} Until that's fixed, no real connection can store its credentials.`
     : null;
 
   return [

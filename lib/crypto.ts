@@ -46,7 +46,7 @@ export class MissingEncryptionKeyError extends Error {
  * the point of use instead.
  */
 function readKey(): Buffer {
-  const raw = process.env.SOCIALOS_ENCRYPTION_KEY?.trim();
+  const raw = normalizeKey(process.env.SOCIALOS_ENCRYPTION_KEY);
   if (!raw) throw new MissingEncryptionKeyError();
 
   const decoded = /^[0-9a-f]{64}$/i.test(raw)
@@ -61,13 +61,41 @@ function readKey(): Buffer {
   return decoded;
 }
 
+/**
+ * Trim, and strip a matching pair of surrounding quotes.
+ *
+ * Pasting a quoted value into a hosting dashboard is common enough — people
+ * copy `SOCIALOS_ENCRYPTION_KEY="abc…"` wholesale from a README — and the
+ * result decodes to the wrong length while looking obviously correct in the
+ * dashboard. Cheap to tolerate; expensive to debug.
+ */
+function normalizeKey(value: string | undefined): string {
+  const trimmed = value?.trim() ?? "";
+  return /^(["']).*\1$/s.test(trimmed) ? trimmed.slice(1, -1).trim() : trimmed;
+}
+
 /** True when tokens can be stored. Used to gate the connect UI. */
 export function isEncryptionConfigured(): boolean {
+  return encryptionKeyProblem() === null;
+}
+
+/**
+ * *Why* tokens can't be stored, or null when they can.
+ *
+ * Split out from the boolean because collapsing "unset" and "set but invalid"
+ * into one flag made every downstream message say "isn't set" — including to
+ * someone looking at the variable in their dashboard, who then has no reason to
+ * believe the app and no way to find the real problem. The two failures have
+ * completely different fixes.
+ */
+export function encryptionKeyProblem(): string | null {
   try {
     readKey();
-    return true;
-  } catch {
-    return false;
+    return null;
+  } catch (error) {
+    return error instanceof Error
+      ? error.message
+      : "SOCIALOS_ENCRYPTION_KEY could not be read.";
   }
 }
 

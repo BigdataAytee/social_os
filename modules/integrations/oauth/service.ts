@@ -8,6 +8,7 @@ import {
 import { assertCan } from "@/lib/auth/permissions";
 import type { Session } from "@/lib/auth/session";
 import {
+  encryptionKeyProblem,
   isEncryptionConfigured,
   openJson,
   sealJson,
@@ -50,12 +51,9 @@ export type ConnectAvailability =
  * each with a different fix, so they are not collapsed into one boolean.
  */
 export function connectAvailability(platform: Platform): ConnectAvailability {
-  if (!isEncryptionConfigured()) {
-    return {
-      available: false,
-      reason:
-        "SOCIALOS_ENCRYPTION_KEY isn't set, so access tokens can't be stored safely. Generate one with `openssl rand -base64 32`.",
-    };
+  const keyProblem = encryptionKeyProblem();
+  if (keyProblem) {
+    return { available: false, reason: keyProblem };
   }
   if (!isPlatformConfigured(platform)) {
     const provider = resolveProvider(platform);

@@ -14,7 +14,15 @@
 import { Platform } from "@prisma/client";
 
 import type { Session } from "@/lib/auth/session";
-import { createPkcePair, decodeState, encodeState, openJson, seal, open as unseal } from "@/lib/crypto";
+import {
+  createPkcePair,
+  decodeState,
+  encodeState,
+  encryptionKeyProblem,
+  openJson,
+  seal,
+  open as unseal,
+} from "@/lib/crypto";
 import { db } from "@/lib/db";
 import { generateIdeasFromAccount } from "@/modules/ai/orchestrator";
 import { getAccountInsights } from "@/modules/insights/service";
@@ -85,6 +93,35 @@ async function main() {
   };
 
   console.log("\nEncryption");
+
+  // The distinction that used to be invisible: an absent key and a present but
+  // invalid one are different problems with different fixes, and both used to
+  // report "isn't set" to the person staring at the value in their dashboard.
+  const goodKey = process.env.SOCIALOS_ENCRYPTION_KEY;
+  ok("a valid key reports no problem", encryptionKeyProblem() === null);
+
+  process.env.SOCIALOS_ENCRYPTION_KEY = "";
+  ok(
+    "an absent key says it is absent",
+    (encryptionKeyProblem() ?? "").includes("is not set")
+  );
+
+  process.env.SOCIALOS_ENCRYPTION_KEY = Buffer.from("only-eleven").toString("base64");
+  const shortProblem = encryptionKeyProblem() ?? "";
+  ok(
+    "a wrong-length key says so, with the length it got",
+    shortProblem.includes("must decode to 32 bytes") && shortProblem.includes("11"),
+    shortProblem.slice(0, 60)
+  );
+  ok("and does not claim the key is missing", !shortProblem.includes("is not set"));
+
+  // Pasting `KEY="…"` wholesale is common and used to decode to the wrong
+  // length while looking obviously correct in the dashboard.
+  process.env.SOCIALOS_ENCRYPTION_KEY = `"${goodKey}"`;
+  ok("a quoted value is accepted rather than silently wrong", encryptionKeyProblem() === null);
+
+  process.env.SOCIALOS_ENCRYPTION_KEY = goodKey;
+
   const box = seal("a-platform-access-token");
   ok("round-trips", unseal(box) === "a-platform-access-token");
   ok("ciphertext is not the plaintext", !box.ciphertext.includes("platform"));
