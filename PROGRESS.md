@@ -210,6 +210,35 @@ safety net but is no longer the normal path.
 ## Session log
 *(append a line here at the end of each session — phase worked on, what shipped, what was deferred)*
 
+- **OS evolution — Phase 1 audit and Phase 2 architecture. No code written.**
+  The brief asks for the architecture before implementation, which is the right
+  order: four of its requirements collide with decisions already shipped here.
+  Written up in `OS-ARCHITECTURE.md` — audit, nine systems, new modules, data
+  model, API and frontend structure, AI/permission/integration architecture, and
+  a 12-stage roadmap.
+
+  **Four collisions surfaced rather than silently resolved.** (1) The brief lists
+  LinkedIn and drops Facebook, while its own rule 5 forbids removing
+  functionality — recommendation is six Studios, not five. (2) "Predict expected
+  reach, engagement, saves, CTR" contradicts `Growth-Strategist-Engine.md` §3,
+  implemented last session as band-plus-reasoning-never-a-percentage;
+  recommendation is to keep the band and add real interquartile ranges where the
+  sample supports them. (3) "The AI gets smarter" reads as training —
+  recommendation is retrieval and recompute over the org's own data, as §0
+  already settled, with copy that never implies fine-tuning. (4) Particles and
+  glow versus the §7 token system and the Phase 8 reduced-motion work —
+  recommendation is to extend the tokens rather than bypass them.
+
+  **The audit found three things worth knowing before anything is built:** the
+  session takes the first `Membership` and cannot switch, so agencies are
+  impossible until tenancy changes; there is no job runner, so nothing
+  continuous can exist; and **`SCHEDULED` posts never actually fire** — publish
+  is synchronous and called by hand. The roadmap puts those three first
+  deliberately, ahead of Mission Control, which would otherwise be built twice.
+
+  Deferred: all implementation, pending a decision on the four collisions and on
+  where to start.
+
 - **Addendum retrofit, session 4 — steps 3 through 7, in one pass.** The
   one-step-per-session rule was explicitly overridden ("finish the remaining
   steps all together"). Every step still got its own verification rather than
