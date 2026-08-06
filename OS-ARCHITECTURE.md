@@ -397,9 +397,9 @@ Ordered by what unblocks the most. Each stage ends usable and verified.
 
 | # | Stage | Why here | Unblocks |
 | --- | --- | --- | --- |
-| **1** | **Job runner** (`modules/jobs` + `/api/cron/jobs`) | Nothing continuous can exist without it, and publishing is currently a lie — scheduled posts never fire | publishing, listening, inbox, automation, reports |
-| **2** | **Publishing queue** | Turns `SCHEDULED` from a label into a promise. Retries, backoff, dead-letter, history | trust in everything else |
-| **3** | **Workspaces + roles** | Touches every `orgId` in the service layer; cheapest now, brutal later | agencies, clients, white-label |
+| **1** | **Job runner** ✅ (`modules/jobs` + `/api/cron/jobs`) | Nothing continuous can exist without it, and publishing is currently a lie — scheduled posts never fire | publishing, listening, inbox, automation, reports |
+| **2** | **Publishing queue** ✅ | Turns `SCHEDULED` from a label into a promise. Retries, backoff, dead-letter, history | trust in everything else |
+| **3** | **Workspaces + roles** ✅ | Touches every `orgId` in the service layer; cheapest now, brutal later | agencies, clients, white-label |
 | **4** | **Brand Brain + Memory** | Makes every later AI surface better rather than each reinventing context | Second Brain, replies, campaigns, remix |
 | **5** | **Unified inbox** | The largest single product gap; needs write scopes and app review | engagement, sentiment, triage |
 | **6** | **Listening + competitor intel** | Feeds the strategist and trend pipeline with outside data | Mission Control, automation triggers |
@@ -414,6 +414,22 @@ Ordered by what unblocks the most. Each stage ends usable and verified.
 difference between a product that schedules posts and one that actually publishes
 them, and between one workspace and an agency. Doing 11 first would be the
 tempting mistake.
+
+### Implementation note on stage 3 — a design that changed on contact
+
+§5 sketched a `Workspace` table *inside* `Organization`. Implementation showed
+that was the wrong shape: **the Organization already was the workspace.** It
+carries every business row, `orgId` isolation is enforced in the service layer
+and covered by the smoke suite, and `@@unique([userId, orgId])` already allowed
+a user to hold several memberships. A nested table would have duplicated a
+boundary that already works and required backfilling a `workspaceId` onto
+sixteen tables, with a fresh opportunity to get isolation wrong on each.
+
+What was actually missing was switching, an agency→client link, and two roles.
+`Organization` gained `kind`, `parentOrgId` and `branding`; the session honours
+an active-workspace cookie that is re-verified against the membership on every
+request. The `Workspace` model in §5 should be read as describing those columns,
+not a separate table.
 
 ### What can't be finished here, and why
 

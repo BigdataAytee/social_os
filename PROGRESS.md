@@ -210,6 +210,43 @@ safety net but is no longer the normal path.
 ## Session log
 *(append a line here at the end of each session — phase worked on, what shipped, what was deferred)*
 
+- **OS evolution — stage 3: workspaces and roles.** The tenancy change, done
+  third on purpose: it touches how `orgId` is derived on every service call, and
+  only gets worse the longer it waits.
+
+  **The design changed on contact with the code, and the new one is better.**
+  `OS-ARCHITECTURE.md` §5 sketched a `Workspace` table inside `Organization`.
+  But the Organization already *was* the workspace — it carries every business
+  row, isolation is enforced in the service layer and already covered by the
+  smoke suite, and `@@unique([userId, orgId])` already permitted several
+  memberships per user. A nested table would have duplicated a working boundary
+  and required backfilling `workspaceId` onto sixteen tables, each a fresh
+  chance to get isolation wrong. What was missing was switching, an
+  agency→client link, and two roles. Recorded in the architecture doc.
+
+  Shipped: `OrgKind` (BRAND | CLIENT), `Organization.parentOrgId` and
+  `branding`, `CREATOR` and `CLIENT` roles, `modules/workspaces`, an
+  active-workspace cookie **re-verified against the membership on every
+  request** so a hand-edited cookie names a workspace the user isn't in and is
+  ignored, and a sidebar switcher that only appears when there's a choice.
+
+  Two deliberate refusals. An agency admin does **not** implicitly get their
+  clients' workspaces — reaching one requires an explicit membership, because
+  "I can see it because I own the parent" is the implicit grant that leaks one
+  client's data to another. And `CLIENT` is an explicit allow-list rather than
+  an extension of VIEWER: it can approve and comment, and cannot even switch
+  workspaces.
+
+  Verified: `smoke:workspaces` 30/30, including the case that matters — one
+  client's draft invisible from another client's workspace *and* from the
+  agency's own, while visible in its own. Plus 45/45, 51/51, 23/23, 38/38,
+  30/30 unchanged; typecheck, lint, build.
+
+  **Stages 4–11 remain**: Brand Brain + Memory, unified inbox, listening,
+  campaign OS, analytics forecasting, automation, reports, Mission Control and
+  the design system. Stage 12 (LinkedIn) is independent and can slot in
+  anywhere.
+
 - **OS evolution — stages 1-2: job runner and publishing queue.** The first two
   roadmap stages, together because the queue and the thing it exists to fix are
   one unit.

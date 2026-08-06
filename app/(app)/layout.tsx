@@ -7,6 +7,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { can } from "@/lib/auth/permissions";
 import { requireSession } from "@/lib/auth/session";
+import { listWorkspaces } from "@/modules/workspaces/service";
 import { isModelConfigured } from "@/modules/ai/orchestrator";
 import { countUnread } from "@/modules/notifications/service";
 
@@ -31,6 +32,7 @@ export default async function AppLayout({
   children: React.ReactNode;
 }) {
   const session = await requireSession();
+  const workspaces = await listWorkspaces(session);
   const unreadCount = await countUnread(session);
 
   return (
@@ -38,7 +40,14 @@ export default async function AppLayout({
       <TooltipProvider delayDuration={200}>
         <AIPanelProvider>
           <StudioTheme className="flex h-screen overflow-hidden bg-canvas">
-            <Sidebar orgName={session.orgName} />
+            <Sidebar
+              orgName={session.orgName}
+              workspaces={workspaces.map((workspace) => ({
+                ...workspace,
+                kind: workspace.kind as string,
+                role: workspace.role as string,
+              }))}
+            />
 
             <div className="flex min-w-0 flex-1 flex-col">
               <Topbar session={session} unreadCount={unreadCount} />

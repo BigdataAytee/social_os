@@ -5,6 +5,10 @@ import { usePathname } from "next/navigation";
 
 import { StudioSwitcher } from "@/components/shell/studio-switcher";
 import { Logo } from "@/components/shell/logo";
+import {
+  WorkspaceSwitcher,
+  type WorkspaceOption,
+} from "@/components/shell/workspace-switcher";
 import { ORG_NAV, PRIMARY_NAV, WORKSPACE_NAV, type NavItem } from "@/lib/navigation";
 import { STUDIOS } from "@/lib/studios";
 import { cn } from "@/lib/utils";
@@ -114,7 +118,15 @@ export function SidebarNav() {
   );
 }
 
-export function Sidebar({ orgName }: { orgName: string }) {
+export type { WorkspaceOption };
+
+export function Sidebar({
+  orgName,
+  workspaces,
+}: {
+  orgName: string;
+  workspaces: WorkspaceOption[];
+}) {
   return (
     <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-surface lg:flex">
       <div className="flex flex-col gap-3 px-3 pb-1 pt-4">
@@ -124,11 +136,19 @@ export function Sidebar({ orgName }: { orgName: string }) {
         <StudioSwitcher />
       </div>
       <SidebarNav />
-      <div className="border-t border-border px-4 py-3">
-        <p className="truncate text-[10px] uppercase tracking-wider text-muted">
-          Organization
-        </p>
-        <p className="truncate text-sm text-secondary">{orgName}</p>
+      <div className="border-t border-border px-2 py-2">
+        {workspaces.length > 1 ? (
+          // The switcher replaces the label entirely when there's a choice —
+          // showing both would be the same information twice.
+          <WorkspaceSwitcher workspaces={workspaces} />
+        ) : (
+          <div className="px-2 py-1">
+            <p className="truncate text-[10px] uppercase tracking-wider text-muted">
+              Organization
+            </p>
+            <p className="truncate text-sm text-secondary">{orgName}</p>
+          </div>
+        )}
       </div>
     </aside>
   );

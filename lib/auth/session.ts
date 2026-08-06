@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
 import type { Role } from "@prisma/client";
@@ -17,6 +18,17 @@ export type Session = {
   orgSlug: string;
   role: Role;
 };
+
+/**
+ * Cookie naming the workspace the user is currently acting in.
+ *
+ * A cookie rather than a column because it is a per-browser view preference,
+ * not a property of the account — the same person can reasonably have two tabs
+ * open on two clients. **It is never trusted:** every read verifies the
+ * membership still exists before honouring it, so a hand-edited cookie names a
+ * workspace the user isn't in and gets ignored.
+ */
+export const ACTIVE_ORG_COOKIE = "socialos_active_org";
 
 export type SessionResult =
   | { status: "anonymous" }
@@ -66,12 +78,18 @@ export const getSessionResult = cache(async (): Promise<SessionResult> => {
       memberships: {
         include: { org: true },
         orderBy: { createdAt: "asc" },
-        take: 1,
       },
     },
   });
 
-  let membership = profile.memberships[0];
+  // The workspace this browser last chose, honoured only if the membership is
+  // still real. Falls back to the earliest membership — which is what the
+  // session did unconditionally before workspaces existed.
+  const requested = cookies().get(ACTIVE_ORG_COOKIE)?.value;
+  let membership =
+    (requested
+      ? profile.memberships.find((m) => m.orgId === requested)
+      : undefined) ?? profile.memberships[0];
 
   // First sign-in: provision a workspace rather than dead-ending (§11).
   if (!membership) {

@@ -39,7 +39,32 @@ enum Role {
   OWNER
   ADMIN
   EDITOR
+  /// Writes and edits, but never submits for approval — a contractor or
+  /// freelancer whose work an EDITOR or above shepherds through the gate.
+  CREATOR
   VIEWER
+  /// Deny-by-default (OS-ARCHITECTURE.md §9). A client reviews and approves
+  /// their own workspace's work and can see nothing else. This is the one
+  /// failure an agency cannot survive, so CLIENT gets an explicit allow-list
+  /// rather than inheriting VIEWER's.
+  CLIENT
+}
+
+/// What kind of workspace an Organization is (OS-ARCHITECTURE.md §11 stage 3).
+///
+/// The Organization already *was* the workspace: it carries every business row,
+/// isolation is enforced in the service layer and covered by the smoke suite,
+/// and the schema already allowed a user to hold several memberships. A separate
+/// Workspace table inside Organization — which the architecture doc sketched —
+/// would have duplicated a boundary that already works and required backfilling
+/// a workspaceId onto sixteen tables. What was actually missing was switching
+/// between them, two roles, and branding.
+enum OrgKind {
+  /// A brand running its own accounts. The default, and what every existing
+  /// organization is.
+  BRAND
+  /// A client workspace owned by an agency, reachable from its parent.
+  CLIENT
 }
 
 enum TaskStatus {
@@ -82,11 +107,21 @@ enum IntegrationMode {
 // ======================= CORE / TENANCY =======================
 
 model Organization {
-  id        String   @id @default(cuid())
-  name      String
-  slug      String   @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  kind        OrgKind  @default(BRAND)
+  /// Set on a CLIENT workspace: the agency that owns it. An agency's admins can
+  /// reach their clients' workspaces; nothing else crosses the line.
+  parentOrgId String?
+  /// White-label surface: logo, accent, report footer. Display only — never
+  /// anything that decides access.
+  branding    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  parent   Organization?  @relation("AgencyClients", fields: [parentOrgId], references: [id], onDelete: SetNull)
+  children Organization[] @relation("AgencyClients")
 
   memberships             Membership[]
   connectedAccounts       ConnectedAccount[]
@@ -107,6 +142,7 @@ model Organization {
   comments                Comment[]
   activityLogs            ActivityLog[]
 
+  @@index([parentOrgId])
   @@map("organizations")
 }
 
