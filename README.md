@@ -161,6 +161,7 @@ app but an unnecessary hazard for migrations and a write-heavy seed. In Vercel,
 | `npm run db:studio` | Prisma Studio |
 | `npm run smoke` | Service-layer suite against a seeded throwaway database |
 | `npm run smoke:oauth` | Connect flow, token refresh, sync and insights against a fake platform |
+| `npm run smoke:unified` | Registry resolution and the unified adapter against a fake provider |
 
 ## Layout
 
@@ -206,6 +207,19 @@ openssl rand -base64 32   # → SOCIALOS_ENCRYPTION_KEY
 | TikTok | `TIKTOK_CLIENT_KEY` / `TIKTOK_CLIENT_SECRET` | developers.tiktok.com |
 | YouTube | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | console.cloud.google.com |
 | Instagram + Facebook | `META_CLIENT_ID` / `META_CLIENT_SECRET` | developers.facebook.com |
+
+### Two ways to connect
+
+Each account stores an `integrationMode`, and the registry resolves its adapter
+from that — so X can run on **direct** while TikTok and Meta stay on
+**unified**, which is four rows with one column set differently rather than a
+fork in the codebase. Nothing above the adapter layer can tell which answered.
+
+| Mode | What it is |
+| --- | --- |
+| *(none)* | Still `MOCK`. Seeded demo data; the Studio is fully usable. |
+| `UNIFIED` | One provider (Ayrshare by default, `AYRSHARE_API_KEY`) already holds the platform approvals, so connecting skips TikTok's audit queue and Meta's app review. It also **publishes for real** — that's the main reason to be on it. |
+| `DIRECT` | This app's own OAuth app per platform. Full control, but you carry X's per-call cost and each platform's own review. Currently **read-only**: publish and trends fall back to the mock, because the scopes requested are read-only. |
 
 A platform with no credentials keeps the mock adapter — its Studio works
 normally and simply reports "not connected", naming the variables it needs.

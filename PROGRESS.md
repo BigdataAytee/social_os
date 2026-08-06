@@ -210,6 +210,34 @@ safety net but is no longer the normal path.
 ## Session log
 *(append a line here at the end of each session — phase worked on, what shipped, what was deferred)*
 
+- **Addendum retrofit, session 3 — step 2 (registry + unified adapter).**
+  Shipped: `getAdapter(platform, mode)` per §4, with `modeAvailability()` for step
+  3's selector; `modules/integrations/unified/` (provider config, one shared
+  client, the adapter); every call site moved off the platform-keyed lookup.
+  Trend panels now go through a separate `getPlatformAdapter()` — they read a
+  platform-wide feed, not an org's data, and letting the account-scoped call take
+  an optional mode would let a caller silently omit it.
+
+  Unified publishes for real, unlike direct: the provider's whole proposition is
+  that it holds write approval, so delegating publish to the mock would discard
+  the reason to be on it. Trends still delegate to the mock on both — no provider
+  exposes trend discovery, because the underlying platforms don't on these tiers.
+
+  Two real bugs caught by the new suite rather than by reading:
+  **(1)** `publishPost` resolved the *oldest* account for a platform, which in any
+  org that connected an account is still the seeded MOCK row — so publishing
+  reported success while nothing left the building. It now prefers a
+  CONNECTED account with a credential and a mode, falling back to any account.
+  **(2)** a 33-byte test key was silently wrong; every downstream availability
+  check correctly refused it, which is how it was found.
+
+  Deferred: steps 3–7. Step 3 (Settings selector) is next and `modeAvailability()`
+  already supplies exactly what it needs. **Open question for step 3:** `DIRECT`
+  is read-only today — publish and trends fall back to the mock because the OAuth
+  scopes requested are read-only — so "a direct adapter exists" is true for
+  reading and false for writing. Whether Direct is selectable on that basis, and
+  what the tooltip says, is a product call.
+
 - **Addendum retrofit, session 2 — step 1 (schema) only.** The three addendum
   documents arrived and are now in the repo root. Their checklist deltas are folded
   into the phases above.
@@ -361,9 +389,13 @@ Not one of the original §13 phases — added after the checklist, on request.
       survived it. `PlatformCredential` already existed; kept, with the deviation from
       §3 documented in the schema (§3's two-column sketch has nowhere to put AES-GCM's
       IV and auth tag).
-- [ ] **Step 2 — adapter registry + unified adapter** (Platform-Connections.md §4).
-      `getAdapter(platform, mode)`; every service-layer call resolves per account.
-      Unified before any direct adapter.
+- [x] **Step 2 — adapter registry + unified adapter** (Platform-Connections.md §4).
+      `getAdapter(platform, mode)` with mock / unified / direct; `modeAvailability()`
+      supplies the Settings selector's three states and the reason each is blocked.
+      Every service-layer call resolves per `ConnectedAccount`. `UnifiedAdapter`
+      pulls posts + analytics and **publishes for real** through the provider,
+      over one shared client that scopes every call to the connected account.
+      Verified by `npm run smoke:unified` (23 checks) against `scripts/fake-unified.ts`.
 - [ ] **Step 3 — connection-type selector** in Settings (Mock / Unified / Direct),
       Direct shown greyed with a tooltip until that platform's adapter exists.
 - [ ] **Step 4 — native composers** (see Phase 2/3 deltas above)

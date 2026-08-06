@@ -1,4 +1,9 @@
-import { ConnectedAccountStatus, Platform, Prisma } from "@prisma/client";
+import {
+  ConnectedAccountStatus,
+  IntegrationMode,
+  Platform,
+  Prisma,
+} from "@prisma/client";
 
 import { assertCan } from "@/lib/auth/permissions";
 import type { Session } from "@/lib/auth/session";
@@ -349,6 +354,12 @@ export async function linkAccount(opts: {
   expiresAt: Date | null;
   scopes: string[];
   meta?: Record<string, unknown>;
+  /**
+   * Which implementation will answer for this account from now on
+   * (Platform-Connections.md §3). Defaults to DIRECT because this function is
+   * the end of the platform's own OAuth flow; the unified path sets UNIFIED.
+   */
+  mode?: IntegrationMode;
 }) {
   // meta holds only display fields (ARCHITECTURE.md §10) — the token went to
   // PlatformCredential above.
@@ -364,6 +375,7 @@ export async function linkAccount(opts: {
     },
     update: {
       status: ConnectedAccountStatus.CONNECTED,
+      integrationMode: opts.mode ?? IntegrationMode.DIRECT,
       lastSyncError: null,
       ...(meta ? { meta } : {}),
     },
@@ -372,6 +384,7 @@ export async function linkAccount(opts: {
       platform: opts.platform,
       handle: opts.handle,
       status: ConnectedAccountStatus.CONNECTED,
+      integrationMode: opts.mode ?? IntegrationMode.DIRECT,
       ...(meta ? { meta } : {}),
     },
   });
@@ -407,6 +420,10 @@ export async function disconnectAccount(session: Session, accountId: string) {
     where: { id: accountId },
     data: {
       status: ConnectedAccountStatus.DISCONNECTED,
+      // Cleared, not kept: §4 makes switching mode an explicit reconnect, and a
+      // mode left on a credential-less account would resolve a real adapter for
+      // a connection that no longer exists.
+      integrationMode: null,
       lastSyncError: null,
     },
   });
@@ -431,6 +448,7 @@ export async function listAccounts(session: Session, platform?: Platform) {
     platform: account.platform,
     handle: account.handle,
     status: account.status,
+    integrationMode: account.integrationMode,
     lastSyncAt: account.lastSyncAt,
     lastSyncError: account.lastSyncError,
     connected: account.credential !== null,

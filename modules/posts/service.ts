@@ -1,4 +1,9 @@
-import { Platform, PostStatus, Prisma } from "@prisma/client";
+import {
+  ConnectedAccountStatus,
+  Platform,
+  PostStatus,
+  Prisma,
+} from "@prisma/client";
 
 import { assertCan } from "@/lib/auth/permissions";
 import type { Session } from "@/lib/auth/session";
@@ -203,7 +208,34 @@ export async function publishPost(session: Session, id: string) {
   if (!existing) throw new Error("Post not found");
 
   const { getAdapter } = await import("@/modules/integrations/registry");
-  const result = await getAdapter(existing.platform).publish(existing);
+
+  // Resolved from the account, not the platform: an org with X on DIRECT and
+  // TikTok on UNIFIED must get a different adapter for each, and a
+  // platform-keyed lookup would silently pick one for both.
+  //
+  // Which account, when there are several: the one with a real connection.
+  // An org that connected X still has its seeded MOCK row, and picking by
+  // creation order finds that one — publishing would report success while
+  // nothing left the building. A live connection outranks a placeholder.
+  const account =
+    (await db.connectedAccount.findFirst({
+      where: {
+        orgId: session.orgId,
+        platform: existing.platform,
+        integrationMode: { not: null },
+        status: ConnectedAccountStatus.CONNECTED,
+        credential: { isNot: null },
+      },
+      orderBy: { createdAt: "desc" },
+    })) ??
+    (await db.connectedAccount.findFirst({
+      where: { orgId: session.orgId, platform: existing.platform },
+      orderBy: { createdAt: "asc" },
+    }));
+  const result = await getAdapter(
+    existing.platform,
+    account?.integrationMode ?? null
+  ).publish(existing);
 
   const post = await db.post.update({
     where: { id: existing.id },
