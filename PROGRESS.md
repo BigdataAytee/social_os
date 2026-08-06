@@ -41,11 +41,17 @@ dropped database and completes cleanly. With no Supabase credentials in `.env`,
 - [x] Topbar
 - [x] Resizable AI panel — drag handle, 300–640px, and it holds the real assistant
 - [x] Command palette (⌘K) functional: navigate + basic actions
-- [x] Dashboard wired to real seeded data: scheduled posts, campaigns, performance overview, AI recommendations, trending topics, notifications, tasks, connected accounts, publishing queue, quick actions, activity feed
+- [x] Dashboard wired to real seeded data: scheduled posts, campaigns, performance overview, trending topics, notifications, tasks, connected accounts, publishing queue, quick actions, activity feed
+- [ ] **AI recommendations** — *corrected 2026-08-06.* This was checked off and the
+      status note claimed rule-based recommendations over the org's own counts. **No
+      such section exists.** The dashboard renders Performance, Publishing queue,
+      Needs approval, Campaigns, Activity, Connected accounts, Notifications, Tasks,
+      Trending and Saved ideas — and nothing else. Nothing in `app/(app)/dashboard`
+      or `modules/` computes a recommendation. The claim was wrong, not merely
+      generous.
 
 **Done when:** Dashboard numbers/lists visibly change if you edit rows in the seeded DB.
-**Status:** met — every figure is a service-layer read. Recommendations are rule-based
-over the org's own counts, deliberately not a model call.
+**Status:** met for everything still checked above — every figure is a service-layer read.
 
 ---
 
@@ -55,18 +61,31 @@ over the org's own counts, deliberately not a model call.
 - [x] Trending Topics · Competitor Tracking
 - [x] Quote Tweet Generator · Reply Generator
 - [x] Scheduling · Content Queue
-- [x] Analytics · Best Posting Times · Engagement Predictions
+- [x] Analytics · Best Posting Times
+- [ ] **Engagement Predictions** — *corrected 2026-08-06.* Previously checked with a
+      status note explaining it was really the Best Posting Times panel. A panel that
+      reports what already happened is not a prediction; unchecking rather than
+      re-explaining.
 - [x] Templates
 
 **Done when:** every feature above reads/writes real DB rows and every AI feature calls the real orchestrator (§9). This becomes the literal template Phase 3 copies — worth getting right before moving on.
-**Status:** met, with one shape deviation worth knowing. Rather than 16 bespoke screens,
+**Status:** mostly met, with two shape deviations worth knowing. Rather than 16 bespoke screens,
 X Studio is `StudioShell` — six tabs (Create / Queue / Ideas / Trends / Analytics /
 Templates) where each named AI feature is a `type` string in the shared generate box, per
 §9's "prompt template plus a type string, never a separate endpoint". Every feature is
 reachable and functional. Two features are narrower than their name suggests: **Viral
 Tweet Library / Swipe File** are served by the Ideas list with a `source` of `swipe-file`
-rather than a separate curated browser, and **Engagement Predictions** is the
-data-derived Best Posting Times panel, not a forecast model.
+rather than a separate curated browser, and **Engagement Predictions** was never built
+(see above).
+
+*Second deviation, recorded 2026-08-06:* the composer is **one generic component**
+(`components/studio/composer.tsx`) shared by all five Studios — a textarea, a campaign
+select and a schedule control, with no per-platform branching whatsoever. It always
+writes `platformData: {}`; nothing in the app produces a structured per-platform shape.
+So `Post.platformData` exists in the schema and is threaded through the service layer,
+but is empty for every row the UI creates. Phase 2 and 3 were marked met on the basis of
+`StudioShell` being consumed unchanged, which is true and was the stated done-condition —
+but "each Studio feels native" is not something the composer currently delivers.
 
 ---
 
@@ -159,6 +178,33 @@ safety net but is no longer the normal path.
 ## Session log
 *(append a line here at the end of each session — phase worked on, what shipped, what was deferred)*
 
+- **Baseline audit (addendum retrofit, session 1).** Asked to integrate three
+  addendum documents — `Platform-Native-Studios.md`, `Growth-Strategist-Engine.md`,
+  `Platform-Connections.md` — which are **not in the repo**, not in the working tree
+  and not anywhere in git history. Every numbered step of that brief cites a section
+  of one of them (`Platform-Connections.md` §3 and §4, `Platform-Native-Studios.md`
+  §1 and §2, `Growth-Strategist-Engine.md` §4 and §5), so none of it can be built
+  without inventing the specification. Nothing was written. The brief also assumed
+  this file already had the addendums' requirements folded into its phases; it did
+  not, and still doesn't.
+
+  What *was* done, because it was the one step independent of those documents:
+  audited every checkbox here against the code. Three corrections, above —
+  dashboard "AI recommendations" (claimed, never built), "Engagement Predictions"
+  (was the Best Posting Times panel wearing a forecast's name), and a new note that
+  all five Studios share one generic composer that always writes an empty
+  `platformData`. Also recorded the schema-drift detection, error boundaries and two
+  smoke suites that shipped but were never logged here.
+
+  Confirmed present, contrary to the brief's "build this" framing:
+  `modules/integrations/registry.ts` and `PlatformCredential` already exist, though
+  the existing credential table was designed against the connected-accounts work in
+  this repo and may not match `Platform-Connections.md` §3.
+  Confirmed absent: `IntegrationMode`, `TrendEvent`, `TrendResponse`,
+  `StrategyRecommendation`, `modules/integrations/unified/`, `modules/strategy/`,
+  `modules/trends/`.
+  **Deferred, blocked:** all seven numbered steps, pending the three documents.
+
 - **Setup simplification.** Cut the path from clone to working app. First
   authenticated request now provisions a workspace instead of dead-ending on
   `/no-organization`, which both closes Phase 8's onboarding item and removes the need
@@ -239,6 +285,15 @@ Not one of the original §13 phases — added after the checklist, on request.
       plus top posts, in engagement rate, with a minimum sample per bucket
 - [x] `generateIdeasFromAccount` in the orchestrator, exposed as an assistant tool
 - [x] Account row and "Analyze my account" panel in every Studio
+- [x] Schema-drift detection: `lib/db-health.ts` compares the migration folders
+      shipped in the build against `_prisma_migrations` and reports `schema-outdated`,
+      naming the pending migrations on `/setup`. Added after a preview deployment
+      running new code against an un-migrated database surfaced as an opaque digest
+- [x] Error boundaries (`app/(app)/error.tsx`, `app/global-error.tsx`) — the digest
+      plus the failures worth checking first, instead of Next's bare message
+- [x] Two verification suites: `npm run smoke` (45 checks, service layer against a
+      seeded database) and `npm run smoke:oauth` (51 checks, the whole connect flow
+      against `scripts/fake-platform.ts`)
 - [ ] **Unexercised against the real platform APIs.** The full flow is verified
       end to end against `scripts/fake-platform.ts` (51 checks), but no request
       has been made to X, TikTok, Meta or Google — the build environment has no
