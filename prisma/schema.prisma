@@ -636,6 +636,11 @@ model XStory {
   /// Component scores, kept so a card can show *why* it ranked. Null members
   /// mean that signal wasn't available — see X-HUB.md §3.
   scoring   Json       @default("{}")
+  /// Module-specific payload: a gist's hashtags and poll, a news story's
+  /// timeline, a trend's meme ideas. Kept apart from `scoring` because that
+  /// field means one thing — how this ranked — and overloading it would make
+  /// both unreadable.
+  details   Json       @default("{}")
   saved     Boolean    @default(false)
   savedAt   DateTime?
   /// Which source produced it, for debugging a hub that looks wrong.

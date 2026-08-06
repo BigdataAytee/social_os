@@ -254,6 +254,9 @@ export type StoryCard = {
   coverUrl: string | null;
   score: number;
   scoring: Record<string, unknown>;
+  /** Module-specific payload — a gist's hashtags, a news timeline. */
+  details: Record<string, unknown>;
+  topics: string[];
   saved: boolean;
   source: string;
   createdAt: Date;
@@ -339,6 +342,8 @@ export async function listStories(
         coverUrl: story.coverUrl,
         score: story.score,
         scoring: (story.scoring as Record<string, unknown>) ?? {},
+        details: (story.details as Record<string, unknown>) ?? {},
+        topics: story.topics,
         saved: story.saved,
         source: story.source,
         createdAt: story.createdAt,

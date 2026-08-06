@@ -69,6 +69,9 @@ export type StoryCardData = {
   coverUrl: string | null;
   score: number;
   scoring: Record<string, unknown>;
+  /** Module-specific payload — hashtags, poll, timeline, angles. */
+  details: Record<string, unknown>;
+  topics: string[];
   saved: boolean;
   source: string;
   createdAt: string;
@@ -93,12 +96,15 @@ export function HubBoard({
   canAct,
   canGenerate,
   modelConfigured,
+  hideIngest = false,
 }: {
   initial: StoryCardData[];
   nextCursor: Cursor;
   canAct: boolean;
   canGenerate: boolean;
   modelConfigured: boolean;
+  /** Set on tabs that render an existing list — one paste box per page. */
+  hideIngest?: boolean;
 }) {
   const [stories, setStories] = useState(initial);
   const [cursor, setCursor] = useState<Cursor>(nextCursor);
@@ -145,7 +151,7 @@ export function HubBoard({
 
   return (
     <div className="flex flex-col gap-5">
-      {canAct && (
+      {canAct && !hideIngest && (
         <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-4">
           <span className="font-mono text-[10px] uppercase tracking-wider text-muted">
             Add posts
@@ -269,6 +275,24 @@ function StoryCard({
             {story.score}
           </Badge>
           <ScoreBreakdown scoring={story.scoring} reply={best} />
+          {/*
+            The post ids, copyable. The News and Gist builders take ids, and
+            without this the only way to get one is the database — which makes
+            a shipped feature depend on a tool the user doesn't have.
+          */}
+          <button
+            type="button"
+            onClick={() => {
+              const ids = [story.original?.id, ...story.replies.map((r) => r.id)]
+                .filter(Boolean)
+                .join(" ");
+              void navigator.clipboard?.writeText(ids);
+              toast.success("Post ids copied — paste them into News or Gists");
+            }}
+            className="font-mono text-[10px] uppercase tracking-wider text-muted transition-colors hover:text-accent"
+          >
+            copy ids
+          </button>
         </div>
         {canAct && (
           <button
@@ -286,6 +310,12 @@ function StoryCard({
           </button>
         )}
       </div>
+
+      {story.summary && (
+        <p className="whitespace-pre-wrap text-sm text-secondary">{story.summary}</p>
+      )}
+
+      <StoryDetails story={story} />
 
       {story.original && <PostView post={story.original} />}
 
@@ -339,6 +369,80 @@ function StoryCard({
         </div>
       )}
     </article>
+  );
+}
+
+/**
+ * The module-specific payload — a gist's hashtags and poll, a news timeline,
+ * a trend's angles.
+ *
+ * One component rather than three cards because the difference between these
+ * story kinds is what they carry, not how they behave: all four save, rank and
+ * generate identically.
+ */
+function StoryDetails({ story }: { story: StoryCardData }) {
+  const details = story.details ?? {};
+  const hashtags = Array.isArray(details.hashtags) ? (details.hashtags as string[]) : [];
+  const angles = Array.isArray(details.angles) ? (details.angles as string[]) : [];
+  const timeline = Array.isArray(details.timeline)
+    ? (details.timeline as { at: string; handle: string; text: string }[])
+    : [];
+  const poll = typeof details.poll === "string" ? details.poll : null;
+  const prompt = typeof details.prompt === "string" ? details.prompt : null;
+
+  if (
+    hashtags.length === 0 &&
+    angles.length === 0 &&
+    timeline.length === 0 &&
+    !poll &&
+    !prompt
+  ) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-border bg-canvas p-3">
+      {hashtags.length > 0 && (
+        <p className="font-mono text-xs text-accent">{hashtags.join(" ")}</p>
+      )}
+      {poll && (
+        <p className="text-xs text-primary">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-muted">
+            Poll{" "}
+          </span>
+          {poll}
+        </p>
+      )}
+      {prompt && (
+        <p className="text-xs text-primary">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-muted">
+            Ask{" "}
+          </span>
+          {prompt}
+        </p>
+      )}
+      {angles.length > 0 && (
+        <ul className="flex flex-col gap-1">
+          {angles.map((angle) => (
+            <li key={angle} className="text-xs text-secondary">
+              · {angle}
+            </li>
+          ))}
+        </ul>
+      )}
+      {timeline.length > 0 && (
+        <ol className="flex flex-col gap-1.5 border-l border-border pl-3">
+          {timeline.map((entry) => (
+            <li key={`${entry.at}-${entry.handle}`} className="text-xs">
+              <span className="font-mono text-[10px] text-muted">
+                {new Date(entry.at).toLocaleString()} · {entry.handle}
+              </span>
+              <p className="text-secondary">{entry.text}</p>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
   );
 }
 

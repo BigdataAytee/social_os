@@ -18,6 +18,16 @@ import {
   tweetIdFrom,
 } from "@/modules/xhub/sources/syndication";
 import { hubCounts, ingest, listStories, setSaved } from "@/modules/xhub/service";
+import {
+  buildGist,
+  buildNewsStory,
+  buildTrendStory,
+  deriveTrends,
+  hubAnalytics,
+  listCreators,
+  listVideos,
+  visibleTopics,
+} from "@/modules/xhub/stories";
 import { DELETED_ID, IDS, startFakeSyndication } from "./fake-syndication";
 
 let failures = 0;
@@ -295,6 +305,112 @@ async function main() {
     secondPage.stories.every((s) => s.id !== firstPage.stories[0]!.id),
     `${secondPage.stories.length} more`
   );
+
+  console.log("\nTrends derived from the corpus");
+  const derived = await deriveTrends(session);
+  ok("topics come back", derived.length > 0, derived.map((t) => t.topic).join(", ") || "none");
+  ok(
+    "ranked by reach, not frequency",
+    derived.every((t, i) => i === 0 || derived[i - 1]!.reach >= t.reach)
+  );
+  ok("each names how many posts it came from", derived.every((t) => t.posts > 0));
+
+  console.log("\nNews, Gists and the story builders");
+  const stored = await db.xPost.findMany({
+    where: { orgId: session.orgId },
+    select: { id: true },
+    take: 3,
+  });
+
+  const newsStory = await buildNewsStory(session, stored.map((p) => p.id));
+  ok("a news item is built", newsStory !== null, newsStory?.title.slice(0, 40));
+
+  const newsRow = await db.xStory.findFirst({
+    where: { orgId: session.orgId, kind: XStoryKind.NEWS },
+  });
+  ok("with a summary", Boolean(newsRow?.summary));
+  const timeline = (newsRow?.details as { timeline?: unknown[] })?.timeline ?? [];
+  ok("and a timeline computed from the rows", timeline.length === stored.length,
+    `${timeline.length} entries`);
+  ok(
+    "ordered oldest first — sequence is a fact, not a model's guess",
+    (timeline as { at: string }[]).every(
+      (entry, i) => i === 0 || entry.at >= (timeline as { at: string }[])[i - 1]!.at
+    )
+  );
+  ok(
+    "the internal key never reaches a screen",
+    visibleTopics(newsRow?.topics ?? []).every((t) => !t.startsWith("__key:"))
+  );
+
+  const rebuilt = await buildNewsStory(session, stored.map((p) => p.id));
+  ok(
+    "rebuilding refreshes rather than duplicating",
+    (await db.xStory.count({
+      where: { orgId: session.orgId, kind: XStoryKind.NEWS },
+    })) === 1,
+    rebuilt?.title.slice(0, 20)
+  );
+
+  const gist = await buildGist(session, stored.map((p) => p.id));
+  ok("a gist is built", gist !== null);
+  const gistRow = await db.xStory.findFirst({
+    where: { orgId: session.orgId, kind: XStoryKind.GIST },
+  });
+  const gistDetails = (gistRow?.details ?? {}) as Record<string, unknown>;
+  ok("it carries a details payload", Object.keys(gistDetails).length > 0,
+    Object.keys(gistDetails).join(", "));
+  ok(
+    "hashtags are hashtags or absent — never half-parsed prose",
+    !Array.isArray(gistDetails.hashtags) ||
+      (gistDetails.hashtags as string[]).every((tag) => tag.startsWith("#"))
+  );
+
+  const topic = derived[0]?.topic;
+  if (topic) {
+    const trendStory = await buildTrendStory(session, topic);
+    ok("a trend is explained", trendStory !== null, topic);
+    ok(
+      "and stored under its own kind",
+      (await db.xStory.count({
+        where: { orgId: session.orgId, kind: XStoryKind.TREND },
+      })) === 1
+    );
+  }
+  ok(
+    "a topic nothing mentions builds nothing rather than an empty story",
+    (await buildTrendStory(session, "zzzznothingmentionsthis")) === null
+  );
+
+  console.log("\nVideos, creators and analytics");
+  const vids = await listVideos(session);
+  ok("videos are found", vids.length > 0, `${vids.length}`);
+  ok("all of them are videos", vids.every((v) => v.mediaType === "video"));
+  ok(
+    "ranked by what they earned",
+    vids.every((v, i) => i === 0 || vids[i - 1]!.likes >= v.likes)
+  );
+
+  const people = await listCreators(session);
+  ok("creators are found", people.length > 0, `${people.length}`);
+  ok(
+    "ranked by average, not total — total just rewards who you collected most of",
+    people.every((c, i) => i === 0 || people[i - 1]!.average >= c.average)
+  );
+  ok("each carries its post count", people.every((c) => c.posts > 0));
+
+  const analytics = await hubAnalytics(session);
+  ok("analytics counts posts", analytics.posts > 0, `${analytics.posts}`);
+  ok("and stories by kind", Object.keys(analytics.byKind).length > 0,
+    Object.keys(analytics.byKind).join(", "));
+  ok("and total interactions", analytics.interactions > 0);
+  ok("creator count agrees with the list", analytics.creators >= people.length);
+
+  console.log("\nIsolation, again — the new surfaces");
+  ok("another org derives no trends", (await deriveTrends(outsider)).length === 0);
+  ok("sees no videos", (await listVideos(outsider)).length === 0);
+  ok("no creators", (await listCreators(outsider)).length === 0);
+  ok("and empty analytics", (await hubAnalytics(outsider)).posts === 0);
 
   console.log("\nCleanup");
   await db.xStory.deleteMany({ where: { orgId: session.orgId } });

@@ -8,6 +8,12 @@ import { db } from "@/lib/db";
 import { generate } from "@/modules/ai/orchestrator";
 import { createPost } from "@/modules/posts/service";
 import { ingest, listStories, setSaved } from "@/modules/xhub/service";
+import {
+  buildGist,
+  buildNewsStory,
+  buildTrendStory,
+  deriveTrends,
+} from "@/modules/xhub/stories";
 import { toActionResult, type ActionResult } from "./result";
 
 /**
@@ -144,5 +150,52 @@ export async function generateFromStoryAction(input: {
       source: generated.source,
       postId: post?.id ?? null,
     };
+  });
+}
+
+
+/**
+ * Build a News item or a Gist from posts already in the corpus.
+ *
+ * Selection is the user's — they choose which posts belong to a story — because
+ * "these three posts are about the same thing" is a judgement a person makes
+ * better and faster than a clustering pass, and getting it wrong produces a news
+ * item that confidently merges two unrelated events.
+ */
+export async function buildStoryAction(input: {
+  kind: "news" | "gist";
+  postIds: string[];
+}): Promise<ActionResult<{ id: string; title: string } | null>> {
+  return toActionResult(async () => {
+    const session = await requireSession();
+    if (input.postIds.length === 0) {
+      throw new Error("Pick at least one post to build from.");
+    }
+    const built =
+      input.kind === "news"
+        ? await buildNewsStory(session, input.postIds)
+        : await buildGist(session, input.postIds);
+    revalidatePath("/hub");
+    return built;
+  });
+}
+
+export async function buildTrendAction(input: {
+  topic: string;
+}): Promise<ActionResult<{ id: string; title: string } | null>> {
+  return toActionResult(async () => {
+    const session = await requireSession();
+    const built = await buildTrendStory(session, input.topic);
+    revalidatePath("/hub");
+    return built;
+  });
+}
+
+export async function deriveTrendsAction(): Promise<
+  ActionResult<Awaited<ReturnType<typeof deriveTrends>>>
+> {
+  return toActionResult(async () => {
+    const session = await requireSession();
+    return deriveTrends(session);
   });
 }
