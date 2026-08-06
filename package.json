@@ -23,6 +23,7 @@
     "smoke:inbox": "tsx scripts/inbox-e2e.ts",
     "smoke:listening": "tsx scripts/listening-e2e.ts",
     "smoke:locale": "tsx scripts/locale-e2e.ts",
+    "smoke:xhub": "tsx scripts/xhub-e2e.ts",
     "postinstall": "prisma generate",
     "setup": "prisma migrate deploy && prisma db seed"
   },

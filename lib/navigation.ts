@@ -2,6 +2,7 @@ import {
   BarChart3,
   Calendar,
   FolderOpen,
+  Flame,
   Inbox,
   Radar,
   LayoutDashboard,
@@ -27,6 +28,9 @@ export type NavItem = {
 
 export const PRIMARY_NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  // Above the Studios: the hub is where a day starts — what happened, what is
+  // worth reacting to — and the Studios are where the reaction gets written.
+  { href: "/hub", label: "X Hub", icon: Flame },
 ];
 
 export const STUDIO_NAV: NavItem[] = STUDIOS.map((studio) => ({

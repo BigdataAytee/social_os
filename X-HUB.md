@@ -58,20 +58,36 @@ everything above it gets built for real:
 The mock is not a placeholder for the UI's sake — it is the same shape the live
 source returns, so switching is a registry entry.
 
-### The decision this leaves with you
+### The path taken: embeds
 
-To make the discovery modules real, one of:
+There is a fourth option, and it turned out to be the good one.
 
-1. **X API paid tier.** Recent search plus trends. Highest fidelity, direct
-   relationship, per-call cost. This is what the code is written against.
-2. **A third-party X data provider.** Cheaper at volume, no tier negotiation,
-   another party in the chain. Slots in as a second `XHubSource`.
-3. **Ship the hub over your own account and the creators you name.** No search:
-   Creator Spotlight works from handles you supply, and Savage Replies works over
-   replies to *your* posts. Genuinely useful, and available on current scopes.
+`cdn.syndication.twimg.com/tweet-result` is the endpoint behind every embedded
+tweet on the web. It takes a tweet id and answers with the text, the author, the
+media and the public counts — **no API key, no tier, no scopes, no connected
+account**. It also frequently carries a slice of the reply thread and the parent
+of a quote, which is exactly the material Savage Replies is made of.
 
-Option 3 works today with no spend, so the build targets it as the floor and
-options 1–2 as the same code with a different source.
+So the hub is fed by *seeded* discovery rather than crawled discovery: a person
+pastes links, shares from their phone, or works from a watchlist, and everything
+downstream — grouping, scoring, the written story, the one-click actions — is
+identical to what a paid search tier would feed. Search buys *finding* posts. It
+was never what made the product.
+
+Scope of use is deliberate and enforced by the code, not by intention:
+`hydrate()` resolves posts a person pointed at, and `timeline()` and `search()`
+**refuse**. The endpoint exists to render embeds; iterating ids to harvest at
+volume would be abusing an interface offered in good faith, and a source that
+quietly grew into a crawler is the kind of thing nobody notices until it is a
+problem.
+
+Remaining options, if keyword discovery is wanted later:
+
+1. **X API paid tier.** Recent search plus trends. Slots in as a second source.
+2. **A third-party X data provider.** Cheaper at volume, another party in the
+   chain. Also just a source.
+
+Neither changes a line above `XHubSource`.
 
 ---
 
