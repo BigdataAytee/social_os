@@ -609,6 +609,10 @@ model XPost {
   reposts         Int      @default(0)
   views           Int      @default(0)
   publishedAt     DateTime
+  /// Where this came from: "x" for a real X post, or a feed id like "news" or
+  /// "reddit". The hub mixes X posts with outside signal, and a card that
+  /// doesn't say which is a card nobody can weigh.
+  source          String   @default("x")
   fetchedAt       DateTime @default(now())
 
   org     Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)

@@ -193,6 +193,12 @@ const scanMonitorsJob: JobHandler = async (job) => {
  */
 const harvestXHubJob: JobHandler = async (job) => {
   const session = await systemSession(job.orgId);
+  // Discovery first: it brings in what is happening, and everything after it —
+  // the harvest's grouping and the suggestions' grounding — reads better for
+  // having today's news already in the corpus.
+  const { discover } = await import("@/modules/xhub/discover");
+  const found = await discover(session).catch(() => ({ items: 0, stories: 0 }));
+
   const { harvest } = await import("@/modules/xhub/harvest");
   const result = await harvest(session);
 
@@ -207,7 +213,7 @@ const harvestXHubJob: JobHandler = async (job) => {
 
   if (result.note) return { summary: result.note };
   return {
-    summary: `${result.own} own, ${result.mentions} mentions, ${result.rivals} rivals, ${result.stories} stories, ${refreshed.suggestions} suggestions`,
+    summary: `${found.items} discovered, ${result.own} own, ${result.mentions} mentions, ${result.rivals} rivals, ${result.stories + found.stories} stories, ${refreshed.suggestions} suggestions`,
   };
 };
 

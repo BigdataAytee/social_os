@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useTransition } from "react";
 import {
   ArrowRight,
+  Globe,
   Loader2,
   MessageSquare,
   RefreshCw,
@@ -14,7 +15,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { harvestAction } from "@/app/actions/xhub";
+import { discoverAction, harvestAction } from "@/app/actions/xhub";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -56,6 +57,26 @@ export function SuggestionsPanel({
   canHarvest: boolean;
 }) {
   const [pending, start] = useTransition();
+  const [finding, startFind] = useTransition();
+
+  function find() {
+    startFind(async () => {
+      const result = await discoverAction();
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      const data = result.data;
+      if (data.note) {
+        toast.warning(data.note);
+        return;
+      }
+      toast.success(
+        `${data.items} items from ${data.sources.join(", ") || "feeds"} — ${data.stories} stories`
+      );
+      window.location.reload();
+    });
+  }
 
   function pull() {
     start(async () => {
@@ -84,11 +105,20 @@ export function SuggestionsPanel({
             What to do next
           </h2>
           <p className="text-xs text-muted">
-            Read from your own posts, your mentions and the competitors you
-            track — not from a prompt.
+            Read from what&rsquo;s being written right now, your own posts, your
+            mentions, and the competitors you track — not from a prompt.
           </p>
         </div>
         {canHarvest && (
+          <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={find} disabled={finding}>
+            {finding ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            ) : (
+              <Globe className="h-4 w-4" aria-hidden />
+            )}
+            Find what&rsquo;s happening
+          </Button>
           <Button variant="secondary" onClick={pull} disabled={pending}>
             {pending ? (
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -97,6 +127,7 @@ export function SuggestionsPanel({
             )}
             Pull from X
           </Button>
+          </div>
         )}
       </div>
 

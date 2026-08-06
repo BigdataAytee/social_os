@@ -37,7 +37,23 @@ import {
   parseSuggestions,
   tabSuggestions,
 } from "@/modules/xhub/tab-suggestions";
+import {
+  discover,
+  getDiscoveryConfig,
+  setDiscoveryConfig,
+} from "@/modules/xhub/discover";
+import {
+  feedItems,
+  newsFor,
+  parseFeed,
+  redditTop,
+} from "@/modules/xhub/sources/feeds";
+import { startFakeFeeds } from "./fake-feeds";
 import { DELETED_ID, IDS, startFakeSyndication } from "./fake-syndication";
+
+/** Same article, one with tracking parameters — must be one row, not two. */
+const RSS_WITHOUT_TRACKING = `<rss><channel><item><title>A story - Punch</title><link>https://x.example/a</link><description>d</description></item></channel></rss>`;
+const RSS_WITH_TRACKING = `<rss><channel><item><title>A story - Punch</title><link>https://x.example/a?utm_source=rss&amp;utm_medium=feed</link><description>d</description></item></channel></rss>`;
 
 let failures = 0;
 let checks = 0;
@@ -636,6 +652,138 @@ async function main() {
   ok("noise below the length floor is dropped", parseSuggestions("ok\nhi").length === 0);
 
   await db.xSuggestion.deleteMany({ where: { orgId: session.orgId } });
+
+  console.log("\nDiscovery — pulling in what's happening");
+  const feeds = await startFakeFeeds();
+  process.env.SOCIALOS_NEWS_BASE = feeds.url;
+  process.env.SOCIALOS_REDDIT_BASE = feeds.url;
+
+  console.log("  parsing");
+  const rssItems = await newsFor("retention", { region: "NG", language: "en" });
+  ok("RSS items parse", rssItems.length === 6, `${rssItems.length}`);
+  ok(
+    "CDATA and entities are unwrapped",
+    rssItems[0]?.text.includes("&") === true &&
+      !rssItems[0]!.text.includes("CDATA"),
+    rssItems[0]?.text.slice(0, 50)
+  );
+  ok(
+    "the outlet moves from the headline to the handle",
+    rssItems[0]?.authorHandle === "Punch" &&
+      !rssItems[0]!.title.includes(" - Punch"),
+    `${rssItems[0]?.authorHandle}: ${rssItems[0]?.title.slice(0, 40)}`
+  );
+  ok("media thumbnails are picked up", rssItems[0]?.imageUrl !== null);
+  ok("dates parse", rssItems.every((i) => !Number.isNaN(i.publishedAt.getTime())));
+  ok(
+    "region and language reach the request",
+    feeds.requested.some((r) => r.includes("gl=NG") && r.includes("hl=en-NG")),
+    feeds.requested[0]?.slice(0, 60)
+  );
+
+  const atom = await feedItems(`${feeds.url}/atom`);
+  ok("Atom entries parse too", atom.length === 1, `${atom.length}`);
+  ok(
+    "an Atom link in an attribute is found",
+    atom[0]?.url === "https://atom.example/retention-revisited",
+    atom[0]?.url ?? "none"
+  );
+
+  ok("a broken feed returns nothing rather than throwing",
+    (await feedItems(`${feeds.url}/broken`)).length === 0);
+  ok("so does a feed that isn't there",
+    (await feedItems("http://127.0.0.1:1/nope")).length === 0);
+
+  const reddit = await redditTop("nigeria");
+  ok("Reddit posts parse", reddit.length === 2, `${reddit.length}`);
+  ok(
+    "stickied moderator posts are dropped",
+    !reddit.some((r) => r.title.includes("read the rules"))
+  );
+  ok("score and comments come through", (reddit[0]?.score ?? 0) > 0 &&
+    (reddit[0]?.comments ?? 0) > 0);
+  ok("the subreddit is the handle", reddit[0]?.authorHandle === "r/nigeria");
+  ok(
+    "tracking parameters don't create a second row",
+    parseFeed(RSS_WITH_TRACKING, "news")[0]?.externalId ===
+      parseFeed(RSS_WITHOUT_TRACKING, "news")[0]?.externalId
+  );
+
+  console.log("  end to end");
+  await db.xPost.deleteMany({ where: { orgId: session.orgId } });
+  await db.xStory.deleteMany({ where: { orgId: session.orgId } });
+  await db.monitor.deleteMany({ where: { orgId: session.orgId } });
+  await db.monitor.create({
+    data: { orgId: session.orgId, term: "retention", kind: "KEYWORD" },
+  });
+
+  const found = await discover(session);
+  ok("items are pulled", found.items > 0, `${found.items}`);
+  ok("the monitor supplied the query", found.queries.includes("retention"),
+    found.queries.join(", "));
+  ok("stories are grouped from them", found.stories > 0, `${found.stories}`);
+  ok("and nothing was wrong", found.note === null);
+
+  const external = await db.xPost.findMany({
+    where: { orgId: session.orgId, source: { not: "x" } },
+  });
+  ok("they're stored as non-X sources", external.length > 0, `${external.length}`);
+  ok(
+    "each says where it came from",
+    external.every((p) => p.source === "news" || p.source === "reddit"),
+    [...new Set(external.map((p) => p.source))].join(", ")
+  );
+
+  const rerun = await discover(session);
+  ok(
+    "a second pass updates rather than duplicating",
+    (await db.xPost.count({
+      where: { orgId: session.orgId, source: { not: "x" } },
+    })) === external.length,
+    `${rerun.items} returned`
+  );
+
+  const newsStories = await db.xStory.findMany({
+    where: { orgId: session.orgId, kind: XStoryKind.NEWS },
+  });
+  ok(
+    "a story names the outlets behind it",
+    newsStories.some(
+      (s) => ((s.details as { outlets?: string[] })?.outlets ?? []).length >= 2
+    ),
+    JSON.stringify((newsStories[0]?.details as { outlets?: string[] })?.outlets ?? [])
+  );
+
+  console.log("  suggestions now stand on live signal");
+  await db.xSuggestion.deleteMany({ where: { orgId: session.orgId } });
+  const live = await tabSuggestions(session, XStoryKind.NEWS);
+  ok("a batch comes back", live.length > 0, `${live.length}`);
+  ok(
+    "and says it read what's being written now",
+    live[0]?.why.includes("right now") === true,
+    live[0]?.why.slice(0, 70)
+  );
+
+  console.log("  configuration is validated, not trusted");
+  await setDiscoveryConfig(session, {
+    feeds: [`${feeds.url}/atom`, "not-a-url", "javascript:alert(1)"],
+    subreddits: ["nigeria", "r/startups", "bad name!", ""],
+  });
+  const config = await getDiscoveryConfig(session);
+  ok("bad URLs are dropped", (config.feeds ?? []).length === 1,
+    (config.feeds ?? []).join(", "));
+  ok(
+    "a javascript: URL never survives",
+    !(config.feeds ?? []).some((f) => f.startsWith("javascript:"))
+  );
+  ok("the r/ prefix is stripped", (config.subreddits ?? []).includes("startups"));
+  ok("invalid subreddit names are dropped", (config.subreddits ?? []).length === 2,
+    (config.subreddits ?? []).join(", "));
+
+  await db.monitor.deleteMany({ where: { orgId: session.orgId } });
+  await feeds.close();
+  delete process.env.SOCIALOS_NEWS_BASE;
+  delete process.env.SOCIALOS_REDDIT_BASE;
 
   console.log("\nCleanup");
   await db.xStory.deleteMany({ where: { orgId: session.orgId } });

@@ -147,7 +147,8 @@ export async function generateForTab(
 ): Promise<TabSuggestion[]> {
   assertCan(session.role, "ai.generate");
 
-  const [trends, profile, ourPosts, hubPosts, account] = await Promise.all([
+  const [trends, profile, ourPosts, hubPosts, discovered, account] =
+    await Promise.all([
     deriveTrends(session, 6),
     getBrandProfile(session),
     db.externalPost.findMany({
@@ -157,10 +158,19 @@ export async function generateForTab(
       select: { text: true, likes: true, shares: true },
     }),
     db.xPost.findMany({
-      where: { orgId: session.orgId },
+      where: { orgId: session.orgId, source: "x" },
       orderBy: { likes: "desc" },
       take: 15,
       select: { authorHandle: true, text: true, likes: true },
+    }),
+    // Outside signal — what is being written about right now, from the feeds
+    // discovery pulls. This is the rung that makes a suggestion about the
+    // world rather than about the account's own back catalogue.
+    db.xPost.findMany({
+      where: { orgId: session.orgId, source: { not: "x" } },
+      orderBy: { publishedAt: "desc" },
+      take: 15,
+      select: { authorHandle: true, text: true, publishedAt: true },
     }),
     db.connectedAccount.findFirst({
       where: { orgId: session.orgId, platform: Platform.X },
@@ -171,10 +181,23 @@ export async function generateForTab(
   // The ladder. Each rung is a real source, and `basis` records which one this
   // batch actually stood on so the UI can say it.
   const grounding: string[] = [];
-  let basis: "corpus" | "profile" | "cold" = "cold";
+  let basis: "live" | "corpus" | "profile" | "cold" = "cold";
+
+  // Highest rung: what is happening now. Placed first in the prompt as well as
+  // first in the ladder, because a suggestion that opens with today's news is
+  // the one worth posting today.
+  if (discovered.length > 0) {
+    basis = "live";
+    grounding.push(
+      `Being written about right now:\n${discovered
+        .slice(0, 10)
+        .map((d) => `- ${d.authorHandle}: ${d.text.replace(/\s+/g, " ").slice(0, 180)}`)
+        .join("\n")}`
+    );
+  }
 
   if (hubPosts.length >= 3 || trends.length > 0) {
-    basis = "corpus";
+    if (basis === "cold") basis = "corpus";
     if (trends.length > 0) {
       grounding.push(
         `Recurring in what this account collected: ${trends
@@ -236,7 +259,12 @@ export async function generateForTab(
   const parsed = parseSuggestions(result.output);
   if (parsed.length === 0) return [];
 
-  const why = whyFor(basis, trends.length, profile?.basedOnPosts ?? 0);
+  const why = whyFor(
+    basis,
+    trends.length,
+    profile?.basedOnPosts ?? 0,
+    discovered.length
+  );
 
   // Replaced rather than accumulated: a tab showing eleven suggestions from
   // three generations is a backlog, not a proposal.
@@ -294,10 +322,14 @@ export function parseSuggestions(
 }
 
 function whyFor(
-  basis: "corpus" | "profile" | "cold",
+  basis: "live" | "corpus" | "profile" | "cold",
   trendCount: number,
-  profilePosts: number
+  profilePosts: number,
+  discoveredCount: number
 ): string {
+  if (basis === "live") {
+    return `From ${discoveredCount} things being written about right now, in your region — plus what you've collected and published.`;
+  }
   if (basis === "corpus") {
     return trendCount > 0
       ? `From ${trendCount} recurring subjects in the posts you've collected.`

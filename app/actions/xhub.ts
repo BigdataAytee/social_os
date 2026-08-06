@@ -7,6 +7,7 @@ import { requireSession } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { generate } from "@/modules/ai/orchestrator";
 import { createPost } from "@/modules/posts/service";
+import { discover, setDiscoveryConfig } from "@/modules/xhub/discover";
 import { harvest } from "@/modules/xhub/harvest";
 import {
   dismissSuggestion,
@@ -285,5 +286,37 @@ export async function refreshSuggestionsAction(): Promise<
     revalidatePath("/hub");
     revalidatePath("/studio/x");
     return result;
+  });
+}
+
+
+/**
+ * Pull in what's being written about right now.
+ *
+ * Queries come from the monitors the org already keeps, scoped to the connected
+ * account's region and language. No API key: Google News RSS, any feed the org
+ * configures, and Reddit's public JSON.
+ */
+export async function discoverAction(): Promise<
+  ActionResult<Awaited<ReturnType<typeof discover>>>
+> {
+  return toActionResult(async () => {
+    const session = await requireSession();
+    const result = await discover(session);
+    revalidatePath("/hub");
+    revalidatePath("/studio/x");
+    return result;
+  });
+}
+
+export async function setDiscoveryConfigAction(input: {
+  feeds: string[];
+  subreddits: string[];
+}): Promise<ActionResult<{ saved: true }>> {
+  return toActionResult(async () => {
+    const session = await requireSession();
+    await setDiscoveryConfig(session, input);
+    revalidatePath("/hub");
+    return { saved: true };
   });
 }
