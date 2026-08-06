@@ -90,6 +90,20 @@ export function ConnectionCard({
 
   const current = account.integrationMode;
 
+  // Only hoisted when *one* reason blocks *every* real mode. Two different
+  // reasons — no TikTok app and no provider key — are two separate things to
+  // fix, and collapsing them would hide one of them.
+  const blocked = options.filter(
+    (option) => option.mode !== null && !option.available
+  );
+  const realModes = options.filter((option) => option.mode !== null).length;
+  const blockedReason =
+    blocked.length === realModes &&
+    blocked.length > 0 &&
+    blocked.every((option) => option.reason === blocked[0]!.reason)
+      ? blocked[0]!.reason
+      : null;
+
   function choose(mode: IntegrationMode | null) {
     if (mode === current) return;
     startTransition(async () => {
@@ -180,6 +194,32 @@ export function ConnectionCard({
         <span className="font-mono text-[10px] uppercase tracking-wider text-muted">
           Connection type
         </span>
+
+        {/*
+          When one missing thing blocks every real option — almost always
+          SOCIALOS_ENCRYPTION_KEY, which gates both modes on every platform —
+          the same sentence appeared three times in 10px warning text inside
+          three greyed-out buttons. That reads as decoration, not as an
+          instruction, and the reported symptom was "the selection is not
+          working": the card looked broken rather than unconfigured. Said once,
+          at full size, above the thing it disables.
+        */}
+        {blockedReason && (
+          <div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning/10 p-3">
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" aria-hidden />
+            <div className="flex min-w-0 flex-col gap-1">
+              <p className="text-xs text-primary">
+                Real connections are switched off. {blockedReason}
+              </p>
+              <p className="text-[11px] text-muted">
+                Add it under Vercel → Settings → Environment Variables, then
+                redeploy. Until then Mock is the only option, and it works
+                normally with seeded data.
+              </p>
+            </div>
+          </div>
+        )}
+
         <div className="grid gap-2 sm:grid-cols-3">
           {options.map((option) => {
             const key = keyOf(option.mode);
@@ -213,9 +253,10 @@ export function ConnectionCard({
                 <span className="text-[11px] leading-snug text-muted">
                   {copy.blurb}
                 </span>
-                {!option.available && option.reason && (
-                  <span className="flex items-start gap-1 text-[10px] leading-snug text-warning">
-                    <Info className="mt-0.5 h-2.5 w-2.5 shrink-0" />
+                {/* Suppressed when the notice above already said it once. */}
+                {!option.available && option.reason && !blockedReason && (
+                  <span className="flex items-start gap-1 text-[11px] leading-snug text-warning">
+                    <Info className="mt-0.5 h-3 w-3 shrink-0" />
                     {option.reason}
                   </span>
                 )}
