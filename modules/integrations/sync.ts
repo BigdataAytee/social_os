@@ -61,7 +61,7 @@ export async function syncAccount(
   if (!account) throw new Error("Account not found");
 
   const since = windowStart(account.lastSyncAt);
-  const adapter = getAdapter(account.platform);
+  const adapter = getAdapter(account.platform, account.integrationMode);
 
   try {
     const [posts, snapshots] = await Promise.all([

@@ -55,6 +55,18 @@ enum ConnectedAccountStatus {
   DISCONNECTED
 }
 
+/// Which implementation of PlatformAdapter answers for an account
+/// (Platform-Connections.md §4). Null while status is MOCK.
+///
+/// Stored per account rather than chosen globally: that is the whole point —
+/// X on DIRECT because its per-call cost is worth paying, while TikTok, Meta
+/// and YouTube stay on UNIFIED to skip the review queues, is four rows with one
+/// field set differently, not a fork in the codebase.
+enum IntegrationMode {
+  DIRECT
+  UNIFIED
+}
+
 // ======================= CORE / TENANCY =======================
 
 model Organization {
@@ -64,21 +76,23 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships       Membership[]
-  connectedAccounts ConnectedAccount[]
-  externalPosts     ExternalPost[]
-  posts             Post[]
-  campaigns         Campaign[]
-  ideas             Idea[]
-  assets            Asset[]
-  folders           Folder[]
-  competitors       Competitor[]
-  brandVoice        BrandVoice?
-  aiGenerations     AIGeneration[]
-  notifications     Notification[]
-  tasks             Task[]
-  comments          Comment[]
-  activityLogs      ActivityLog[]
+  memberships             Membership[]
+  connectedAccounts       ConnectedAccount[]
+  externalPosts           ExternalPost[]
+  trendEvents             TrendEvent[]
+  strategyRecommendations StrategyRecommendation[]
+  posts                   Post[]
+  campaigns               Campaign[]
+  ideas                   Idea[]
+  assets                  Asset[]
+  folders                 Folder[]
+  competitors             Competitor[]
+  brandVoice              BrandVoice?
+  aiGenerations           AIGeneration[]
+  notifications           Notification[]
+  tasks                   Task[]
+  comments                Comment[]
+  activityLogs            ActivityLog[]
 
   @@map("organizations")
 }
@@ -120,17 +134,21 @@ model Membership {
 // is wired; UI never needs to know the difference.
 
 model ConnectedAccount {
-  id            String                 @id @default(cuid())
-  orgId         String
-  platform      Platform
-  handle        String
-  status        ConnectedAccountStatus @default(MOCK)
-  meta          Json? // adapter-specific display fields only — never store raw tokens here
+  id              String                 @id @default(cuid())
+  orgId           String
+  platform        Platform
+  handle          String
+  status          ConnectedAccountStatus @default(MOCK)
+  /// Null while status is MOCK; set the moment a real connection is made
+  /// (Platform-Connections.md §3). Every service-layer call resolves its adapter
+  /// with getAdapter(account.platform, account.integrationMode).
+  integrationMode IntegrationMode?
+  meta            Json? // adapter-specific display fields only — never store raw tokens here
   /// Last successful pull from the platform API. Null means never synced.
-  lastSyncAt    DateTime?
+  lastSyncAt      DateTime?
   /// Why the last sync failed, if it did. Cleared on the next success.
-  lastSyncError String?
-  createdAt     DateTime               @default(now())
+  lastSyncError   String?
+  createdAt       DateTime               @default(now())
 
   org           Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
   snapshots     AnalyticsSnapshot[]
@@ -143,6 +161,22 @@ model ConnectedAccount {
 }
 
 /// OAuth tokens for a ConnectedAccount, encrypted at rest.
+///
+/// DEVIATION from Platform-Connections.md §3, deliberate and kept.
+/// That section sketches `accessTokenEnc` / `refreshTokenEnc` as two independent
+/// encrypted columns. This table stores one AES-256-GCM envelope over both
+/// instead, because GCM needs a unique IV *and* an authentication tag per
+/// encryption — the two-column sketch has nowhere to put either, and dropping
+/// the tag would mean a tampered row decrypts to plausible garbage that then
+/// gets sent to a platform API as a bearer credential. Two separately sealed
+/// columns would need four more columns for no benefit, since the pair is
+/// always read together. §3's actual requirements are all met: one dedicated
+/// tightly-scoped table, column-level encryption, key held outside the database,
+/// and read from exactly one place (modules/integrations/oauth/service.ts).
+///
+/// `externalId` and `scopes` are additions §3 doesn't mention: the platform's
+/// own account id is needed in every API path, and the granted scope set can be
+/// narrower than the requested one.
 ///
 /// A separate table rather than columns on ConnectedAccount because
 /// ARCHITECTURE.md §10 reserves `meta` for display fields and forbids tokens
@@ -212,6 +246,71 @@ model ExternalPost {
   @@unique([accountId, externalId])
   @@index([orgId, publishedAt])
   @@map("external_posts")
+}
+
+// ======================= TRENDS (fan-out pipeline) =======================
+// Platform-Native-Studios.md §2 — one detected trend, fanned out through five
+// prompt templates that each already know their platform's native shape.
+
+model TrendEvent {
+  id         String   @id @default(cuid())
+  orgId      String
+  topic      String
+  summary    String
+  sourceUrl  String?
+  /// "breaking" | "rising" | "steady" — decides how fast a response is worth
+  /// drafting at all.
+  velocity   String
+  /// "quick-hit" | "explainer-worthy" — decides Shorts vs long-form on YouTube,
+  /// and single post vs carousel elsewhere.
+  depth      String
+  detectedAt DateTime @default(now())
+
+  org       Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  responses TrendResponse[]
+
+  @@index([orgId, detectedAt])
+  @@map("trend_events")
+}
+
+model TrendResponse {
+  id           String   @id @default(cuid())
+  trendEventId String
+  platform     Platform
+  /// Set once the draft is reviewed and saved as a real Post. Null means the
+  /// draft was generated but never accepted — the pipeline auto-drafts, it
+  /// never auto-publishes.
+  draftPostId  String?
+  createdAt    DateTime @default(now())
+
+  trendEvent TrendEvent @relation(fields: [trendEventId], references: [id], onDelete: Cascade)
+
+  @@map("trend_responses")
+}
+
+// ==================== GROWTH STRATEGIST ENGINE ====================
+// Growth-Strategist-Engine.md §4. Statistics plus one LLM synthesis step, not a
+// trained model — a recompute pipeline, not a training pipeline.
+
+model StrategyRecommendation {
+  id                 String   @id @default(cuid())
+  orgId              String
+  platform           Platform
+  /// "best-time" | "content-type-ranking" | "weekly-briefing"
+  type               String
+  payload            Json
+  /// "low" | "medium" | "high" — driven by sample size, not vibes. Cold-start
+  /// rows fall back to benchmarks.json and are always "low".
+  confidence         String
+  /// Timestamp of the freshest data point this used, so the UI can say "based
+  /// on data through <date>" rather than implying real-time omniscience.
+  basedOnDataThrough DateTime
+  generatedAt        DateTime @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, platform, type])
+  @@map("strategy_recommendations")
 }
 
 // ============================ CONTENT ============================

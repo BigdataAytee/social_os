@@ -1,0 +1,159 @@
+import { createServer, type Server } from "node:http";
+
+/**
+ * A stand-in for a unified provider's API (Platform-Connections.md §4).
+ *
+ * Strict where it matters: it rejects a request without the bearer API key, and
+ * — the one that actually protects users — a request without the per-account
+ * key header. On a multi-tenant plan that header is the only thing separating
+ * one org's data from another's, so a fake that ignored it would let a
+ * tenant-isolation bug ship.
+ *
+ * Point the app at it with SOCIALOS_UNIFIED_BASE.
+ */
+
+export const FAKE_UNIFIED_KEY = "fake-unified-api-key";
+
+export type FakeUnified = {
+  url: string;
+  server: Server;
+  /** Every Profile-Key the server was called with, for isolation assertions. */
+  seenAccountKeys: string[];
+  published: { post: string; platforms: string[] }[];
+  close: () => Promise<void>;
+};
+
+/** Two accounts' worth of history, so cross-tenant leakage is detectable. */
+function historyFor(accountKey: string) {
+  const now = Date.now();
+  const day = 86_400_000;
+
+  // Only this key's own posts. If the adapter ever forgets the header, the
+  // server answers 400 rather than quietly returning someone else's rows.
+  const label = accountKey === "acct-second" ? "second" : "primary";
+
+  const rows: { id: string; text: string; daysAgo: number; video: boolean }[] = [];
+  for (let i = 0; i < 12; i++) {
+    rows.push({
+      id: `${label}-post-${i}`,
+      text:
+        i % 3 === 0
+          ? `#buildinpublic weekly shipping notes, edition ${i}. What changed.`
+          : `Short note ${i} from the ${label} account.`,
+      daysAgo: i * 3,
+      video: i % 3 === 0,
+    });
+  }
+
+  return rows.map((row) => ({
+    id: row.id,
+    post: row.text,
+    platforms: ["twitter"],
+    created: new Date(now - row.daysAgo * day).toISOString(),
+    postUrl: `https://example.test/${row.id}`,
+    mediaUrls: row.video ? ["https://example.test/v.mp4"] : [],
+    isVideo: row.video,
+  }));
+}
+
+export async function startFakeUnified(): Promise<FakeUnified> {
+  const seenAccountKeys: string[] = [];
+  const published: { post: string; platforms: string[] }[] = [];
+
+  const server = createServer((req, res) => {
+    const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+    const send = (status: number, body: unknown) => {
+      res.writeHead(status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(body));
+    };
+
+    if (req.headers.authorization !== `Bearer ${FAKE_UNIFIED_KEY}`) {
+      return send(401, { message: "Invalid API key" });
+    }
+
+    const accountKey = req.headers["profile-key"];
+    if (typeof accountKey !== "string" || !accountKey) {
+      // The whole point of the header. Never answer without it.
+      return send(400, { message: "Profile-Key header is required" });
+    }
+    seenAccountKeys.push(accountKey);
+
+    const readBody = (then: (body: Record<string, unknown>) => void) => {
+      let raw = "";
+      req.on("data", (chunk) => (raw += chunk));
+      req.on("end", () => {
+        try {
+          then(raw ? JSON.parse(raw) : {});
+        } catch {
+          send(400, { message: "Malformed JSON" });
+        }
+      });
+    };
+
+    if (url.pathname === "/history") {
+      return send(200, { posts: historyFor(accountKey) });
+    }
+
+    if (url.pathname === "/analytics/post" && req.method === "POST") {
+      return readBody((body) => {
+        const id = String(body.id ?? "");
+        // Videos out-engage text on this fixture, so the insights layer has a
+        // recoverable pattern rather than uniform noise.
+        const video = id.includes("-0") || Number(id.split("-").pop()) % 3 === 0;
+        send(200, {
+          twitter: {
+            analytics: {
+              likeCount: video ? 400 : 60,
+              commentCount: video ? 55 : 6,
+              shareCount: video ? 70 : 4,
+              impressionCount: 9_000,
+              saveCount: 12,
+              clickCount: 30,
+            },
+          },
+        });
+      });
+    }
+
+    if (url.pathname === "/analytics/social" && req.method === "POST") {
+      return readBody(() =>
+        send(200, { twitter: { analytics: { followersCount: 22_065 } } })
+      );
+    }
+
+    if (url.pathname === "/post" && req.method === "POST") {
+      return readBody((body) => {
+        published.push({
+          post: String(body.post ?? ""),
+          platforms: (body.platforms as string[]) ?? [],
+        });
+        send(200, {
+          status: "success",
+          postIds: [
+            {
+              platform: "twitter",
+              id: `published-${published.length}`,
+              postUrl: `https://example.test/published-${published.length}`,
+            },
+          ],
+        });
+      });
+    }
+
+    return send(404, { message: `No route ${url.pathname}` });
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (typeof address === "string" || address === null) {
+    throw new Error("Fake unified provider failed to bind");
+  }
+
+  return {
+    server,
+    url: `http://127.0.0.1:${address.port}`,
+    seenAccountKeys,
+    published,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
+}

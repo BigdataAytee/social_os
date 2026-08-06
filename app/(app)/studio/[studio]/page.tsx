@@ -20,7 +20,7 @@ import {
   connectAvailability,
   listAccounts,
 } from "@/modules/integrations/oauth/service";
-import { getAdapter } from "@/modules/integrations/registry";
+import { getPlatformAdapter } from "@/modules/integrations/registry";
 import { listPosts } from "@/modules/posts/service";
 import { templatesFor } from "@/modules/templates/registry";
 
@@ -58,7 +58,7 @@ export default async function StudioPage({ params }: Params) {
     listPosts(session, { platform, take: 40 }),
     listIdeas(session, { platform, take: 50 }),
     listCompetitors(session, platform),
-    getAdapter(platform).fetchTrends(),
+    getPlatformAdapter(platform).fetchTrends(),
     getSeries(session, { platform, days: 30 }),
     getTotals(session, { platform, days: 30 }),
     getBestPostingTimes(session, platform),

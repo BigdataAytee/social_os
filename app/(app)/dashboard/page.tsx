@@ -36,7 +36,7 @@ import {
 } from "@/modules/analytics/service";
 import { listCampaigns } from "@/modules/campaigns/service";
 import { listIdeas } from "@/modules/ideas/service";
-import { getAdapter } from "@/modules/integrations/registry";
+import { getPlatformAdapter } from "@/modules/integrations/registry";
 import { listNotifications } from "@/modules/notifications/service";
 import { countByStatus, listPosts } from "@/modules/posts/service";
 import { listTasks } from "@/modules/team/service";
@@ -78,7 +78,7 @@ export default async function DashboardPage() {
     listActivity(session, 8),
     listIdeas(session, { take: 5 }),
     countByStatus(session),
-    getAdapter(Platform.X).fetchTrends(),
+    getPlatformAdapter(Platform.X).fetchTrends(),
   ]);
 
   const openTasks = tasks.filter((t) => t.status !== "DONE");

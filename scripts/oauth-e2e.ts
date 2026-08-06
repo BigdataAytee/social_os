@@ -28,7 +28,7 @@ import {
   withAccessToken,
 } from "@/modules/integrations/oauth/service";
 import { redirectUri } from "@/modules/integrations/oauth/providers";
-import { isLivePlatform } from "@/modules/integrations/registry";
+import { isDirectAvailable } from "@/modules/integrations/registry";
 import { syncAccount } from "@/modules/integrations/sync";
 import { FAKE_CLIENT, startFakePlatform } from "./fake-platform";
 
@@ -115,10 +115,10 @@ async function main() {
 
   console.log("\nConfiguration gating");
   ok("X reports connectable", connectAvailability(Platform.X).available);
-  ok("X uses the live adapter", isLivePlatform(Platform.X));
+  ok("X can use a direct adapter", isDirectAvailable(Platform.X));
   ok(
     "an unconfigured platform stays on the mock",
-    !isLivePlatform(Platform.TIKTOK)
+    !isDirectAvailable(Platform.TIKTOK)
   );
   ok(
     "unavailable platforms name the missing variable",
