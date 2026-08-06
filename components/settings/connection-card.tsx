@@ -38,6 +38,7 @@ export type ConnectionCardData = {
   connected: boolean;
   lastSyncAt: string | null;
   lastSyncError: string | null;
+  lastSyncNote: string | null;
   timezone: string | null;
   region: string | null;
   language: string | null;
@@ -368,6 +369,19 @@ export function ConnectionCard({
 
       {account.lastSyncError && (
         <p className="text-xs text-danger">{account.lastSyncError}</p>
+      )}
+
+      {/*
+        Not styled as an error, because it isn't one. A successful sync that
+        found nothing used to render as "Last synced 14:32" and an empty
+        Studio — identical to a broken integration, and the usual cause is a
+        limitation nobody could guess from the outside.
+      */}
+      {!account.lastSyncError && account.lastSyncNote && (
+        <p className="flex items-start gap-1.5 text-xs leading-snug text-muted">
+          <Info className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
+          {account.lastSyncNote}
+        </p>
       )}
       {account.connected && account.lastSyncAt && (
         <p className="font-mono text-[10px] text-muted">

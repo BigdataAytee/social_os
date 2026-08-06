@@ -94,6 +94,7 @@ export default async function SettingsPage() {
                   connected: account.connected,
                   lastSyncAt: account.lastSyncAt?.toISOString() ?? null,
                   lastSyncError: account.lastSyncError,
+                  lastSyncNote: account.lastSyncNote,
                   timezone: account.timezone,
                   region: account.region,
                   language: account.language,

@@ -449,6 +449,7 @@ export async function listAccounts(session: Session, platform?: Platform) {
     integrationMode: account.integrationMode,
     lastSyncAt: account.lastSyncAt,
     lastSyncError: account.lastSyncError,
+    lastSyncNote: account.lastSyncNote,
     connected: account.credential !== null,
     scopes: account.credential?.scopes ?? [],
     expiresAt: account.credential?.expiresAt ?? null,

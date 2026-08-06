@@ -198,3 +198,20 @@ function text(value: unknown): string | null {
 export function networkName(platform: Platform): string {
   return unifiedProvider().networkFor[platform];
 }
+
+/**
+ * Does a network name from a *response* refer to this platform?
+ *
+ * Separate from `networkName` because sending and matching are different jobs:
+ * we send one canonical value, but must recognise every name the provider might
+ * answer with. Matching strictly on what we sent is how X posts tagged `x`
+ * rather than `twitter` would be filtered out one by one, leaving a sync that
+ * reports success and zero posts.
+ */
+export function matchesNetwork(platform: Platform, value: string): boolean {
+  const provider = unifiedProvider();
+  const names = provider.networkAliases?.[platform] ?? [
+    provider.networkFor[platform],
+  ];
+  return names.some((name) => name.toLowerCase() === value.toLowerCase());
+}

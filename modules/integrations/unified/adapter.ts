@@ -10,7 +10,7 @@ import type {
   Snapshot,
   Trend,
 } from "../types";
-import { networkName, unifiedRequest } from "./client";
+import { matchesNetwork, networkName, unifiedRequest } from "./client";
 
 /**
  * One `PlatformAdapter` implementation covering all five networks, backed by a
@@ -164,7 +164,15 @@ export class UnifiedAdapter implements PlatformAdapter {
 
     const recent = posts.filter((post) => {
       if (!post.created) return false;
-      if (post.platforms && !post.platforms.includes(network)) return false;
+      // Alias-aware: the provider may answer with a different name than it
+      // accepts — see `matchesNetwork`. A strict match here drops every post
+      // and reports a successful sync of nothing.
+      if (
+        post.platforms &&
+        !post.platforms.some((name) => matchesNetwork(this.platform, name))
+      ) {
+        return false;
+      }
       return new Date(post.created) >= since;
     });
     if (recent.length === 0) return [];

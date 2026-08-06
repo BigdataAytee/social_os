@@ -23,6 +23,15 @@ export const FAKE_UNIFIED_KEY = "fake-unified-api-key";
  */
 export const PRIMARY_PROFILE = "primary-profile";
 
+/**
+ * A profile the provider knows about but which has published nothing through
+ * it — the state of every account on the day it is connected.
+ *
+ * Worth a fixture of its own because zero is a *correct* answer here, and the
+ * app has to distinguish it from a broken pull.
+ */
+export const EMPTY_PROFILE = "acct-empty";
+
 export type FakeUnified = {
   url: string;
   server: Server;
@@ -34,6 +43,8 @@ export type FakeUnified = {
 
 /** Two accounts' worth of history, so cross-tenant leakage is detectable. */
 function historyFor(accountKey: string) {
+  if (accountKey === EMPTY_PROFILE) return [];
+
   const now = Date.now();
   const day = 86_400_000;
 
@@ -57,7 +68,11 @@ function historyFor(accountKey: string) {
   return rows.map((row) => ({
     id: row.id,
     post: row.text,
-    platforms: ["twitter"],
+    // Half tagged with the post-rebrand name. A provider mid-migration answers
+    // with both, and a strict match on the value we *send* would drop these
+    // silently — a successful sync of nothing, which is the failure this
+    // fixture exists to catch.
+    platforms: [row.id.endsWith("1") || row.id.endsWith("4") ? "x" : "twitter"],
     created: new Date(now - row.daysAgo * day).toISOString(),
     postUrl: `https://example.test/${row.id}`,
     mediaUrls: row.video ? ["https://example.test/v.mp4"] : [],

@@ -1,4 +1,8 @@
-import { ConnectedAccountStatus, Platform } from "@prisma/client";
+import {
+  ConnectedAccountStatus,
+  IntegrationMode,
+  Platform,
+} from "@prisma/client";
 
 import { assertCan } from "@/lib/auth/permissions";
 import type { Session } from "@/lib/auth/session";
@@ -15,6 +19,26 @@ import { getAdapter } from "./registry";
  * it goes out, and the whole point of re-syncing is to catch that.
  */
 
+/**
+ * Why a successful sync came back empty.
+ *
+ * The unified case is the one that surprises people, and it is a property of
+ * the provider rather than a bug: its history endpoint returns posts published
+ * *through the provider*, not the account's existing timeline. A brand that has
+ * posted on X for years and connected today has no provider history at all, so
+ * zero is the correct answer to a question they didn't realise they were
+ * asking.
+ */
+function emptyPullNote(mode: IntegrationMode | null): string {
+  if (mode === IntegrationMode.UNIFIED) {
+    return "Connected, but nothing to pull yet. Your provider reports posts published through it — not your account's existing timeline — so this stays empty until you publish from SocialOS. Analytics and the inbox fill in as that happens.";
+  }
+  if (mode === IntegrationMode.DIRECT) {
+    return "Connected, but the platform returned no posts in the window. That is normal for a quiet account; if you have posted recently, check the connection's scopes.";
+  }
+  return "No posts in the window.";
+}
+
 /** How far back a sync reaches when the account has never been pulled. */
 const FIRST_SYNC_DAYS = 90;
 /** Overlap on subsequent syncs, so late-arriving engagement is picked up. */
@@ -26,6 +50,8 @@ export type SyncResult = {
   handle: string;
   posts: number;
   snapshots: number;
+  /** Set when the sync succeeded but found nothing, explaining why. */
+  note?: string | null;
 };
 
 function windowStart(lastSyncAt: Date | null): Date {
@@ -113,11 +139,19 @@ export async function syncAccount(
       });
     }
 
+    // A sync that found nothing is not a failure, but it looks exactly like one
+    // from an empty Studio — and the cause is usually a limitation nobody could
+    // guess. Saying so is the difference between "this is broken" and "this is
+    // working, and here is what it can see".
+    const note =
+      posts.length === 0 ? emptyPullNote(account.integrationMode) : null;
+
     await db.connectedAccount.update({
       where: { id: account.id },
       data: {
         lastSyncAt: new Date(),
         lastSyncError: null,
+        lastSyncNote: note,
         // A MOCK account that just pulled real rows is connected; leave a
         // DISCONNECTED one alone rather than reviving it behind the person's back.
         ...(account.status === ConnectedAccountStatus.ERROR ||
@@ -138,6 +172,7 @@ export async function syncAccount(
       handle: account.handle,
       posts: posts.length,
       snapshots: snapshots.length,
+      note,
     };
   } catch (error) {
     const message =

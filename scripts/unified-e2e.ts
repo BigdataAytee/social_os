@@ -19,8 +19,17 @@ import { UnifiedAdapter } from "@/modules/integrations/unified/adapter";
 import { syncAccount } from "@/modules/integrations/sync";
 import { getAccountInsights } from "@/modules/insights/service";
 import { publishPost } from "@/modules/posts/service";
-import { unifiedRequest } from "@/modules/integrations/unified/client";
-import { FAKE_UNIFIED_KEY, PRIMARY_PROFILE, startFakeUnified } from "./fake-unified";
+import {
+  matchesNetwork,
+  networkName,
+  unifiedRequest,
+} from "@/modules/integrations/unified/client";
+import {
+  EMPTY_PROFILE,
+  FAKE_UNIFIED_KEY,
+  PRIMARY_PROFILE,
+  startFakeUnified,
+} from "./fake-unified";
 
 let failures = 0;
 let checks = 0;
@@ -135,7 +144,12 @@ async function main() {
   });
 
   const result = await syncAccount(session, account.id);
-  ok("sync pulled posts", result.posts > 0, `${result.posts} posts`);
+  // Exactly twelve, not "more than zero". The fake tags three of them with the
+  // post-rebrand network name; without alias-aware matching those three are
+  // filtered out and this reports nine — a quiet undercount that a
+  // greater-than-zero assertion would wave through.
+  ok("sync pulled every post, whichever name its network carried", result.posts === 12, `${result.posts} posts`);
+  ok("and reported no empty-pull note", !result.note, result.note ?? "none");
   ok("sync derived snapshots", result.snapshots > 0, `${result.snapshots} days`);
   ok(
     "the per-account header was sent on every call",
@@ -143,6 +157,16 @@ async function main() {
       fake.seenAccountKeys.every((key) => key === "acct-primary"),
     `${fake.seenAccountKeys.length} calls, all scoped`
   );
+
+  console.log("\nNetwork names: sent one way, read another");
+  ok("X is sent to the provider as twitter", networkName(Platform.X) === "twitter");
+  ok("and twitter is recognised coming back", matchesNetwork(Platform.X, "twitter"));
+  ok(
+    "so is the post-rebrand name — a strict match would drop these posts",
+    matchesNetwork(Platform.X, "x")
+  );
+  ok("case doesn't matter", matchesNetwork(Platform.X, "Twitter"));
+  ok("another network's name is not accepted", !matchesNetwork(Platform.X, "tiktok"));
 
   console.log("\nProvider errors carry the provider's own words");
   // "Ayrshare returned 400: HTTP 400" was a real message from production — the
@@ -307,6 +331,38 @@ async function main() {
     "it was addressed to the right network",
     fake.published[0]?.platforms.includes("twitter"),
     fake.published[0]?.platforms.join(",")
+  );
+
+  console.log("\nAn empty pull explains itself");
+  // Zero posts is a legitimate outcome — a provider's history covers what was
+  // published *through it*, not the account's back catalogue — but rendered as
+  // "Last synced 14:32" and an empty Studio it is indistinguishable from a
+  // broken integration. A window with nothing in it forces that path.
+  await db.externalPost.deleteMany({ where: { accountId: primaryAccount.id } });
+  // Repoint at a profile the provider knows but which has published nothing
+  // through it — the state of every account on the day it is connected, and the
+  // one this note exists for.
+  const emptySealed = sealJson({ accessToken: EMPTY_PROFILE });
+  await db.platformCredential.update({
+    where: { accountId: primaryAccount.id },
+    data: { ...emptySealed, externalId: EMPTY_PROFILE },
+  });
+
+  const emptyResult = await syncAccount(session, primaryAccount.id);
+  ok("an empty pull returns zero", emptyResult.posts === 0, `${emptyResult.posts}`);
+  ok(
+    "and says why rather than reporting bare success",
+    Boolean(emptyResult.note) && (emptyResult.note ?? "").includes("published through it"),
+    (emptyResult.note ?? "no note").slice(0, 70)
+  );
+
+  const noted = await db.connectedAccount.findUnique({
+    where: { id: primaryAccount.id },
+  });
+  ok("the note is stored for the UI to show", Boolean(noted?.lastSyncNote));
+  ok(
+    "and it is not recorded as an error — an empty pull is not a failure",
+    noted?.lastSyncError === null
   );
 
   console.log("\nCleanup");

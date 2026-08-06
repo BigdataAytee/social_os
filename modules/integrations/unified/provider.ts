@@ -24,6 +24,17 @@ export type UnifiedProvider = {
   apiKeyEnv: string;
   /** The provider's own name for each network, in its request payloads. */
   networkFor: Record<Platform, string>;
+  /**
+   * Every name the provider might use for a network when *reading* it back.
+   *
+   * Sending one name and matching on exactly that name assumes the provider
+   * echoes what it accepts. X makes that assumption unsafe: the request value
+   * is still `twitter` while responses may carry either `twitter` or `x`
+   * depending on the provider's own migration, and a strict match silently
+   * drops every post — a sync that succeeds with zero results, which is the
+   * hardest failure to notice.
+   */
+  networkAliases?: Partial<Record<Platform, string[]>>;
   /** Header carrying the per-connected-account key on multi-user plans. */
   accountKeyHeader: string;
   docsUrl: string;
@@ -40,6 +51,9 @@ const AYRSHARE: UnifiedProvider = {
     [Platform.INSTAGRAM]: "instagram",
     [Platform.FACEBOOK]: "facebook",
     [Platform.YOUTUBE]: "youtube",
+  },
+  networkAliases: {
+    [Platform.X]: ["twitter", "x"],
   },
   // Ayrshare scopes a call to one of your users' connected accounts with this
   // header; without it every call answers for the primary profile instead,

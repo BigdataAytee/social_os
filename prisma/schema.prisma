@@ -215,6 +215,14 @@ model ConnectedAccount {
   lastSyncAt      DateTime?
   /// Why the last sync failed, if it did. Cleared on the next success.
   lastSyncError   String?
+  /// Why the last *successful* sync found nothing.
+  ///
+  /// Distinct from lastSyncError on purpose. A sync that completes and returns
+  /// zero rows is not a failure, but it is indistinguishable from one to
+  /// somebody looking at an empty Studio — and the usual cause is a real
+  /// limitation they had no way to guess. A note keeps lastSyncError meaning
+  /// "something broke" while still explaining the silence.
+  lastSyncNote    String?
   createdAt       DateTime               @default(now())
 
   org           Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
