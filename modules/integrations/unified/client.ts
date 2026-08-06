@@ -116,10 +116,7 @@ export async function unifiedRequest<T>(opts: RequestOptions): Promise<T> {
   }
 
   if (!response.ok) {
-    const message =
-      (payload as { message?: string; error?: string }).message ??
-      (payload as { error?: string }).error ??
-      `HTTP ${response.status}`;
+    const message = extractMessage(payload, text, response.status);
 
     // A provider outage and a revoked account need different responses from the
     // person reading the error — one is "wait", the other is "reconnect" — so
@@ -139,10 +136,62 @@ export async function unifiedRequest<T>(opts: RequestOptions): Promise<T> {
         `${provider.label} is having trouble (${response.status}). This is on their side; the next sync will retry.`
       );
     }
-    throw new Error(`${provider.label} returned ${response.status}: ${message}`);
+    // The path is included because "400 on /history" and "400 on
+    // /analytics/post" are different problems, and the previous message named
+    // neither the endpoint nor the reason.
+    throw new Error(
+      `${provider.label} returned ${response.status} from ${opts.path}: ${message}`
+    );
   }
 
   return payload as T;
+}
+
+/**
+ * The provider's own words for what went wrong.
+ *
+ * The first version read `.message` then `.error` and otherwise fell back to
+ * `HTTP ${status}` — which, interpolated into "returned 400: HTTP 400",
+ * reported the status twice and the reason never. Ayrshare puts its detail in
+ * at least four shapes depending on the endpoint, and an error handler that
+ * discards the error is worse than no handler: it converts a diagnosable
+ * failure into a mystery.
+ *
+ * Falls through to the raw body, truncated. An unparsed response is still far
+ * more use than a status code, and this is the one place where showing the
+ * provider's own text is exactly what the reader needs.
+ */
+function extractMessage(payload: unknown, raw: string, status: number): string {
+  const body = payload as {
+    message?: unknown;
+    error?: unknown;
+    errors?: unknown;
+    status?: unknown;
+    code?: unknown;
+    data?: { message?: unknown };
+  };
+
+  const first =
+    Array.isArray(body?.errors) && body.errors.length > 0
+      ? (body.errors[0] as { message?: unknown; code?: unknown })
+      : null;
+
+  const detail =
+    text(body?.message) ??
+    text(body?.error) ??
+    text(first?.message) ??
+    text(body?.data?.message) ??
+    // Nothing recognised. The raw body beats the status code every time.
+    (raw.trim() ? raw.trim().slice(0, 300) : null);
+
+  const code = body?.code ?? first?.code;
+  const suffix = code !== undefined && code !== null ? ` (code ${String(code)})` : "";
+
+  return detail ? `${detail}${suffix}` : `no detail in the ${status} response`;
+}
+
+function text(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 /** The provider's own name for a platform, in its request payloads. */

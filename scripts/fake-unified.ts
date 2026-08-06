@@ -115,6 +115,33 @@ export async function startFakeUnified(): Promise<FakeUnified> {
       });
     };
 
+    // Error-shape probe. Ayrshare reports failures in several shapes depending
+    // on the endpoint, and the client used to discard all of them; this lets the
+    // suite assert on each one rather than on the shape we happened to expect.
+    if (url.pathname === "/error-shape") {
+      const shape = url.searchParams.get("shape");
+      if (shape === "message") {
+        return send(400, { status: "error", message: "Invalid platform value" });
+      }
+      if (shape === "errors") {
+        return send(400, {
+          status: "error",
+          errors: [{ code: 189, message: "TikTok is not linked to this profile" }],
+        });
+      }
+      if (shape === "data") {
+        return send(400, { data: { message: "Nested detail" } });
+      }
+      if (shape === "unknown") {
+        return send(400, { somethingElse: true, hint: "not a shape we parse" });
+      }
+      if (shape === "empty") {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        return res.end("");
+      }
+      return send(400, { message: "unknown shape" });
+    }
+
     if (url.pathname === "/history") {
       return send(200, { posts: historyFor(accountKey) });
     }

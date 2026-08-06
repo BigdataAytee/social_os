@@ -148,10 +148,15 @@ export class UnifiedAdapter implements PlatformAdapter {
   async fetchPosts(accountId: string, since: Date): Promise<ExternalPostData[]> {
     const network = networkName(this.platform);
 
+    // `platform` is deliberately not sent. It is not a documented parameter on
+    // this endpoint, the filter below already does the work client-side, and an
+    // unrecognised query parameter is the most likely thing a strict validator
+    // rejects with a 400 — which is what a real connection hit. Sending nothing
+    // we don't need is free; guessing at an undocumented parameter is not.
     const history = await unifiedRequest<{ posts?: ProviderPost[] } | ProviderPost[]>({
       path: "/history",
       accountId,
-      query: { lastRecords: 100, platform: network },
+      query: { lastRecords: 100 },
     });
 
     // Providers differ on whether history is the array or wraps it.

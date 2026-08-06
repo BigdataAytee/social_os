@@ -19,6 +19,7 @@ import { UnifiedAdapter } from "@/modules/integrations/unified/adapter";
 import { syncAccount } from "@/modules/integrations/sync";
 import { getAccountInsights } from "@/modules/insights/service";
 import { publishPost } from "@/modules/posts/service";
+import { unifiedRequest } from "@/modules/integrations/unified/client";
 import { FAKE_UNIFIED_KEY, PRIMARY_PROFILE, startFakeUnified } from "./fake-unified";
 
 let failures = 0;
@@ -142,6 +143,72 @@ async function main() {
       fake.seenAccountKeys.every((key) => key === "acct-primary"),
     `${fake.seenAccountKeys.length} calls, all scoped`
   );
+
+  console.log("\nProvider errors carry the provider's own words");
+  // "Ayrshare returned 400: HTTP 400" was a real message from production — the
+  // handler read two keys, found neither, and reported the status twice.
+  const shapes: [string, string][] = [
+    ["message", "Invalid platform value"],
+    ["errors", "TikTok is not linked to this profile"],
+    ["data", "Nested detail"],
+  ];
+  for (const [shape, expected] of shapes) {
+    checks += 1;
+    try {
+      await unifiedRequest({ path: "/error-shape", query: { shape } });
+      failures += 1;
+      console.log(`  ✗ ${shape} shape — expected a rejection, got none`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const passed = message.includes(expected);
+      if (!passed) failures += 1;
+      console.log(
+        `  ${passed ? "✓" : "✗"} the ${shape} shape surfaces its detail — ${message.slice(0, 80)}`
+      );
+    }
+  }
+
+  checks += 1;
+  try {
+    await unifiedRequest({ path: "/error-shape", query: { shape: "errors" } });
+    failures += 1;
+    console.log("  ✗ error codes are included — expected a rejection");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    const passed = message.includes("189");
+    if (!passed) failures += 1;
+    console.log(`  ${passed ? "✓" : "✗"} the provider's error code is included`);
+  }
+
+  checks += 1;
+  try {
+    await unifiedRequest({ path: "/error-shape", query: { shape: "unknown" } });
+    failures += 1;
+    console.log("  ✗ unrecognised shape — expected a rejection");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    // The raw body beats a bare status code: an unparsed response is still the
+    // only evidence of what went wrong.
+    const passed = message.includes("not a shape we parse") && message.includes("/error-shape");
+    if (!passed) failures += 1;
+    console.log(
+      `  ${passed ? "✓" : "✗"} an unrecognised shape falls back to the raw body and names the path`
+    );
+  }
+
+  checks += 1;
+  try {
+    await unifiedRequest({ path: "/error-shape", query: { shape: "empty" } });
+    failures += 1;
+    console.log("  ✗ empty body — expected a rejection");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    const passed = !message.includes("HTTP 400") && message.includes("400");
+    if (!passed) failures += 1;
+    console.log(
+      `  ${passed ? "✓" : "✗"} an empty body never reports the status twice — ${message.slice(0, 70)}`
+    );
+  }
 
   console.log("\nOne-click connect: the primary profile");
   // The path a single-brand deployment actually uses, and the one that reached
