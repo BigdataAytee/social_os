@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import type { Platform } from "@prisma/client";
+import { XStoryKind, type Platform } from "@prisma/client";
 
 import { PageHeader } from "@/components/shell/page-placeholder";
 import { StudioShell } from "@/components/studio/studio-shell";
@@ -8,6 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { can } from "@/lib/auth/permissions";
 import { requireSession, type Session } from "@/lib/auth/session";
 import { db } from "@/lib/db";
+import { listStories } from "@/modules/xhub/service";
+import { deriveTrends } from "@/modules/xhub/stories";
 import { getStudio } from "@/lib/studios";
 import { isModelConfigured } from "@/modules/ai/orchestrator";
 import {
@@ -60,6 +62,8 @@ export default async function StudioPage({ params }: Params) {
     accounts,
     trendEvents,
     recommendations,
+    hubFeed,
+    hubTrends,
   ] = await Promise.all([
     listPosts(session, { platform, take: 40 }),
     listIdeas(session, { platform, take: 50 }),
@@ -72,6 +76,12 @@ export default async function StudioPage({ params }: Params) {
     listAccounts(session, platform),
     listTrendEvents(session),
     listRecommendations(session, platform),
+    // Only the X Studio renders the hub, so the other four don't pay for the
+    // query at all.
+    platform === "X"
+      ? listStories(session, { kind: XStoryKind.SAVAGE, take: 10 })
+      : Promise.resolve({ stories: [], nextCursor: null }),
+    platform === "X" ? deriveTrends(session, 6) : Promise.resolve([]),
   ]);
 
   // The briefing is stored, not regenerated per view — it's the one LLM step in
@@ -140,6 +150,31 @@ export default async function StudioPage({ params }: Params) {
           trends,
           series: series[0] ?? null,
           totals,
+          // The hub is an X surface — the other Studios get null, and the tab
+          // simply isn't rendered for them.
+          hub:
+            platform === "X"
+              ? {
+                  stories: hubFeed.stories.map((story) => ({
+                    ...story,
+                    createdAt: story.createdAt.toISOString(),
+                    original: story.original
+                      ? {
+                          ...story.original,
+                          publishedAt: story.original.publishedAt.toISOString(),
+                        }
+                      : null,
+                    replies: story.replies.map((reply) => ({
+                      ...reply,
+                      publishedAt: reply.publishedAt.toISOString(),
+                    })),
+                  })),
+                  trends: hubTrends,
+                  canAct: can(session.role, "idea.write"),
+                  canGenerate: can(session.role, "ai.generate"),
+                  modelConfigured: isModelConfigured(),
+                }
+              : null,
           bestTimes: bestTimes.slots,
           bestTimesZone: bestTimes.timezone,
           templates: templatesFor(platform),

@@ -38,6 +38,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { createIdeaAction, deleteIdeaAction } from "@/app/actions/workspace";
 import type { Studio } from "@/lib/studios";
 import { zoneAbbreviation } from "@/lib/time";
+import {
+  StudioHubPanel,
+  type StudioHubData,
+} from "@/components/hub/studio-hub-panel";
 import type { PlatformSeries, Totals } from "@/modules/analytics/service";
 import type { Template } from "@/modules/templates/registry";
 import type { Trend } from "@/modules/integrations/types";
@@ -58,6 +62,8 @@ export type StudioShellData = {
   trends: Trend[];
   series: PlatformSeries | null;
   totals: Totals;
+  /** Present only for the X Studio — the hub is an X surface. */
+  hub: StudioHubData | null;
   bestTimes: { day: number; hour: number; score: number; posts: number }[];
   /** The zone those hours are in. Rendered next to them — an unlabelled hour
    *  is how these numbers silently meant UTC to every account. */
@@ -139,6 +145,15 @@ export function StudioShell({
             <Lightbulb className="h-3.5 w-3.5" />
             Ideas
           </TabsTrigger>
+          {data.hub && (
+            <TabsTrigger value="hub">
+              <Flame className="h-3.5 w-3.5" />
+              Hub
+              <span className="font-mono text-[10px] tabular text-muted">
+                {data.hub.stories.length}
+              </span>
+            </TabsTrigger>
+          )}
           <TabsTrigger value="trends">
             <Flame className="h-3.5 w-3.5" />
             Trends
@@ -219,6 +234,20 @@ export function StudioShell({
         </TabsContent>
 
         {/* ------------------------------------------------------------ trends */}
+        {/* --------------------------------------------------------------- hub */}
+        {/*
+          The X Hub, inside the Studio it belongs to.
+          It also lives at /hub as a full page with all eight modules — this is
+          the two or three that matter while you are actually writing, because
+          leaving the Studio to see what happened and coming back to write about
+          it is the trip this whole surface exists to remove.
+        */}
+        {data.hub && (
+          <TabsContent value="hub">
+            <StudioHubPanel hub={data.hub} />
+          </TabsContent>
+        )}
+
         <TabsContent value="trends">
           <div className="flex flex-col gap-6">
             <TrendResponsePanel
