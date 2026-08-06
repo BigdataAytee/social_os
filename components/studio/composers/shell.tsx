@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import { PostStatus, type Platform } from "@prisma/client";
 import { CalendarClock, FileText, Loader2, Send } from "lucide-react";
 import { toast } from "sonner";
 
 import { createPostAction } from "@/app/actions/posts";
+import { PredictionBadge } from "@/components/studio/prediction-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,43 +17,56 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
-import { CHARACTER_LIMITS } from "@/lib/validators/platform-data";
-import { cn } from "@/lib/utils";
 
 /**
- * The composer (§8). Writes through createPostAction → the post service, so an
- * EDITOR's "schedule" lands in NEEDS_APPROVAL exactly as it would from any
- * other surface — the UI doesn't reimplement the rule, it just reports it.
+ * Everything the five native composers share: the campaign picker, the schedule
+ * control, the save/schedule actions, and the engagement-prediction badge
+ * (Growth-Strategist-Engine.md §6 — "the chosen given suggestion moment").
+ *
+ * Each Studio supplies its own editor above this and, critically, its own
+ * `platformData` — the native shape is the point, and a shared shell that
+ * flattened it back to body text would defeat the whole exercise. `body` is
+ * still written because the queue, calendar and search all read it; it's the
+ * plain-text rendering of the native shape, not a second source of truth.
  */
-export function Composer({
+
+export type ComposerSubmission = {
+  body: string;
+  platformData: Record<string, unknown>;
+};
+
+export function ComposerShell({
   platform,
-  value,
-  onChange,
   campaigns,
   canSchedule,
+  title,
+  children,
+  build,
+  onSaved,
 }: {
   platform: Platform;
-  value: string;
-  onChange: (value: string) => void;
   campaigns: { id: string; name: string }[];
   canSchedule: boolean;
+  title: string;
+  /** The Studio's own editor. */
+  children: ReactNode;
+  /** Returns the post to save, or an error string explaining what's missing. */
+  build: () => ComposerSubmission | string;
+  onSaved: () => void;
 }) {
   const [scheduledAt, setScheduledAt] = useState("");
   const [campaignId, setCampaignId] = useState<string>("none");
   const [pending, startTransition] = useTransition();
 
-  const limit = CHARACTER_LIMITS[platform];
-  const remaining = limit - value.length;
-  const over = remaining < 0;
+  // Held so the prediction badge can score the draft as it stands, without
+  // every keystroke in the editor re-running a prediction.
+  const preview = build();
+  const draft = typeof preview === "string" ? null : preview;
 
   function save(status: PostStatus) {
-    if (!value.trim()) {
-      toast.error("Write something first");
-      return;
-    }
-    if (over) {
-      toast.error(`That's ${Math.abs(remaining)} characters over the limit`);
+    const built = build();
+    if (typeof built === "string") {
+      toast.error(built);
       return;
     }
     if (status !== PostStatus.DRAFT && !scheduledAt) {
@@ -63,8 +77,9 @@ export function Composer({
     startTransition(async () => {
       const result = await createPostAction({
         platform,
-        body: value,
+        body: built.body,
         status,
+        platformData: built.platformData,
         scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : null,
         campaignId: campaignId === "none" ? null : campaignId,
       });
@@ -85,8 +100,8 @@ export function Composer({
             : "Scheduled"
       );
 
-      onChange("");
       setScheduledAt("");
+      onSaved();
     });
   }
 
@@ -94,26 +109,10 @@ export function Composer({
     <div className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5">
       <div className="flex items-center gap-2">
         <FileText className="h-4 w-4 text-secondary" />
-        <h3 className="font-display text-sm font-medium text-primary">
-          Composer
-        </h3>
-        <span
-          className={cn(
-            "ml-auto font-mono text-[11px] tabular",
-            over ? "text-danger" : remaining < limit * 0.1 ? "text-warning" : "text-muted"
-          )}
-        >
-          {value.length}/{limit}
-        </span>
+        <h3 className="font-display text-sm font-medium text-primary">{title}</h3>
       </div>
 
-      <Textarea
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        rows={7}
-        placeholder="Write the post, or generate one above and hit Use this."
-        className={cn(over && "border-danger")}
-      />
+      {children}
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-2">
@@ -122,7 +121,7 @@ export function Composer({
             id="schedule-at"
             type="datetime-local"
             value={scheduledAt}
-            onChange={(e) => setScheduledAt(e.target.value)}
+            onChange={(event) => setScheduledAt(event.target.value)}
           />
         </div>
         <div className="flex flex-col gap-2">
@@ -133,15 +132,23 @@ export function Composer({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="none">No campaign</SelectItem>
-              {campaigns.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.name}
+              {campaigns.map((campaign) => (
+                <SelectItem key={campaign.id} value={campaign.id}>
+                  {campaign.name}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
       </div>
+
+      {/* Before you confirm, not after — feedback on this specific draft. */}
+      <PredictionBadge
+        platform={platform}
+        body={draft?.body ?? ""}
+        platformData={draft?.platformData ?? {}}
+        scheduledAt={scheduledAt || null}
+      />
 
       <div className="flex flex-wrap items-center gap-2">
         <Button

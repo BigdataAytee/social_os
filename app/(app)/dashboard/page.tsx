@@ -7,6 +7,7 @@ import {
   Bell,
   CalendarClock,
   CheckSquare,
+  Compass,
   Flame,
   Inbox,
   Lightbulb,
@@ -27,7 +28,7 @@ import { StatTile } from "@/components/ui/stat-tile";
 import { can } from "@/lib/auth/permissions";
 import { requireSession } from "@/lib/auth/session";
 import { STUDIOS, studioForPlatform } from "@/lib/studios";
-import { formatCompact } from "@/lib/utils";
+import { cn, formatCompact } from "@/lib/utils";
 import { listActivity } from "@/modules/activity/service";
 import {
   getSeries,
@@ -37,6 +38,7 @@ import {
 import { listCampaigns } from "@/modules/campaigns/service";
 import { listIdeas } from "@/modules/ideas/service";
 import { getPlatformAdapter } from "@/modules/integrations/registry";
+import { topRecommendations } from "@/modules/strategy/briefing";
 import { listNotifications } from "@/modules/notifications/service";
 import { countByStatus, listPosts } from "@/modules/posts/service";
 import { listTasks } from "@/modules/team/service";
@@ -63,6 +65,7 @@ export default async function DashboardPage() {
     ideas,
     counts,
     trends,
+    strategy,
   ] = await Promise.all([
     getTotals(session, { days: 30 }),
     getSeries(session, { days: 30 }),
@@ -79,6 +82,7 @@ export default async function DashboardPage() {
     listIdeas(session, { take: 5 }),
     countByStatus(session),
     getPlatformAdapter(Platform.X).fetchTrends(),
+    topRecommendations(session),
   ]);
 
   const openTasks = tasks.filter((t) => t.status !== "DONE");
@@ -111,6 +115,49 @@ export default async function DashboardPage() {
           </div>
         }
       />
+
+      <Section
+        title="This Week's Strategy"
+        description="From this account's own best times and content-type performance"
+        href="/analytics"
+      >
+        {strategy.length === 0 ? (
+          <EmptyState
+            icon={Compass}
+            title="No recommendations yet"
+            description="Connect an account and sync it, then generate a growth briefing from any Studio's Analytics tab. Recommendations recompute nightly after that."
+          />
+        ) : (
+          <div className="flex flex-col gap-2">
+            {strategy.map((item, index) => (
+              <div
+                key={`${item.platform}-${index}`}
+                className="flex flex-col gap-1 rounded-md border border-border bg-surface px-3 py-2.5"
+              >
+                <span className="flex flex-wrap items-center gap-2">
+                  <PlatformDot platform={item.platform} />
+                  <span className="text-sm text-primary">{item.headline}</span>
+                  <span
+                    className={cn(
+                      "ml-auto font-mono text-[10px] uppercase tracking-wider",
+                      item.confidence === "low" ? "text-warning" : "text-muted"
+                    )}
+                  >
+                    {item.confidence} confidence
+                  </span>
+                </span>
+                <span className="text-xs text-muted">{item.detail}</span>
+                {/* §2: never imply real-time omniscience about an account
+                    that was last synced days ago. */}
+                <span className="font-mono text-[10px] text-muted">
+                  Based on data through{" "}
+                  {new Date(item.basedOnDataThrough).toLocaleDateString()}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
 
       <Section
         title="Performance"

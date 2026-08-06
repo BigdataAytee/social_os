@@ -46,14 +46,14 @@ dropped database and completes cleanly. With no Supabase credentials in `.env`,
 - [x] Resizable AI panel — drag handle, 300–640px, and it holds the real assistant
 - [x] Command palette (⌘K) functional: navigate + basic actions
 - [x] Dashboard wired to real seeded data: scheduled posts, campaigns, performance overview, trending topics, notifications, tasks, connected accounts, publishing queue, quick actions, activity feed
-- [ ] **AI recommendations** — *corrected 2026-08-06.* This was checked off and the
+- [x] **AI recommendations** — *corrected 2026-08-06, replaced 2026-08-06.* This was checked off and the
       status note claimed rule-based recommendations over the org's own counts. **No
       such section exists.** The dashboard renders Performance, Publishing queue,
       Needs approval, Campaigns, Activity, Connected accounts, Notifications, Tasks,
       Trending and Saved ideas — and nothing else. Nothing in `app/(app)/dashboard`
       or `modules/` computes a recommendation. The claim was wrong, not merely
       generous. Superseded by the delta below.
-- [ ] **"This Week's Strategy" card** (Growth-Strategist-Engine.md §6, §7) — top
+- [x] **"This Week's Strategy" card** (Growth-Strategist-Engine.md §6, §7) — top
       3–5 recommendations across all platforms, reading `StrategyRecommendation`.
       Blocked on the engine (Phase 7 delta).
 
@@ -69,14 +69,14 @@ dropped database and completes cleanly. With no Supabase credentials in `.env`,
 - [x] Quote Tweet Generator · Reply Generator
 - [x] Scheduling · Content Queue
 - [x] Analytics · Best Posting Times
-- [ ] **Engagement Predictions** — *corrected 2026-08-06.* Previously checked with a
+- [x] **Engagement Predictions** — *corrected 2026-08-06, built 2026-08-06.* Previously checked with a
       status note explaining it was really the Best Posting Times panel. A panel that
       reports what already happened is not a prediction; unchecking rather than
       re-explaining. Superseded by the two deltas below.
-- [ ] **Native composer: tweet-card stack** (Platform-Native-Studios.md §1, §4) —
+- [x] **Native composer: tweet-card stack** (Platform-Native-Studios.md §1, §4) —
       per-card 280 counter, reorderable, quote-tweet target picker; Thread Builder
       enforces hook → payoff → close. `platformData` takes the `kind: "thread"` shape.
-- [ ] **Inline engagement-prediction badge** in the schedule modal
+- [x] **Inline engagement-prediction badge** in the schedule modal
       (Growth-Strategist-Engine.md §3, §7) — band plus reasoning, never a fabricated
       precise percentage.
 - [x] Templates
@@ -108,13 +108,13 @@ but "each Studio feels native" is not something the composer currently delivers.
 - [x] Facebook Studio — AI Post Writer, Long-form Content Generator, Community Management, Group Content Planner, Business Page Manager, Event Promotion, Comment Assistant, Messenger Templates, Analytics, Scheduler, Campaign Planner
 - [x] YouTube Studio — Topic Research, Keyword Explorer, Video SEO, AI Script Writer, Title Generator, Description Generator, Thumbnail Ideas, Shorts Generator, Competitor Analysis, Analytics, Trend Explorer
 
-- [ ] **Native composers per Studio** (Platform-Native-Studios.md §1, §4) — TikTok
+- [x] **Native composers per Studio** (Platform-Native-Studios.md §1, §4) — TikTok
       vertical 9:16 storyboard timeline with a trending-sound picker; Instagram
       slide-deck grid with the cover hook as its own field; Facebook longer-form
       editor with `discussionPrompt` first-class; YouTube paired title/thumbnail
       workshop (2–3 concepts side by side, never generated separately) plus chapter
       markers. Each writes its own `platformData` shape.
-- [ ] **Inline engagement-prediction badge** in every Studio's schedule modal
+- [x] **Inline engagement-prediction badge** in every Studio's schedule modal
 
 **Done when:** all 5 Studios are reachable from the switcher, each visually distinct via its accent color, structurally consistent via `StudioShell`.
 **Status:** met — all five consume `StudioShell` unchanged; they differ only by registry
@@ -130,7 +130,7 @@ screens — real per-feature endpoints arrive with real adapters (§10).
 - [x] Tool-calling: `createPost`, `scheduleContent`, `repurposeContent`, `saveIdea`, `listIdeas` map to real service-layer calls (not a separate mock path)
 - [x] "Repurpose this into everything" flow: one input → multi-platform draft bundle → review before saving
 
-- [ ] **Trend Response pipeline** (Platform-Native-Studios.md §2) — `modules/trends/pipeline.ts`,
+- [x] **Trend Response pipeline** (Platform-Native-Studios.md §2) — `modules/trends/pipeline.ts`,
       `POST /api/trends/respond`, and the five-draft review screen reusing the
       repurpose review pattern rather than a second one. Auto-drafts, never auto-publishes.
 
@@ -173,7 +173,7 @@ roles are assigned to existing members.
 - [x] Unified cross-platform analytics dashboard
 - [x] AI performance recommendations
 
-- [ ] **Growth Strategist engine** (Growth-Strategist-Engine.md §5, §7) —
+- [x] **Growth Strategist engine** (Growth-Strategist-Engine.md §5, §7) —
       `modules/strategy/engine.ts` (best-time + content-type-ranking aggregation),
       `briefing.ts` (the one LLM synthesis step), `predict.ts` (on-demand, not
       persisted), `benchmarks.json` cold-start fallback with `confidence: "low"`,
@@ -209,6 +209,53 @@ safety net but is no longer the normal path.
 
 ## Session log
 *(append a line here at the end of each session — phase worked on, what shipped, what was deferred)*
+
+- **Addendum retrofit, session 4 — steps 3 through 7, in one pass.** The
+  one-step-per-session rule was explicitly overridden ("finish the remaining
+  steps all together"). Every step still got its own verification rather than
+  one pass at the end.
+
+  **Step 3.** Three-way Mock/Unified/Direct selector on each connection card.
+  Switching an already-connected account's mode deletes the credential and
+  requires an explicit reconnect — §4 is clear that this changes who holds the
+  credential and the org should know. Carrying it across would leave an account
+  that looks connected and fails on first use, since a platform token means
+  nothing to the provider and vice versa.
+
+  **Step 4.** The generic composer is gone. Five native ones: tweet-card stack
+  with a per-card counter, 9:16 storyboard timeline with on-screen text as a
+  real field, slide-deck grid with the cover hook lifted out, discussion-first
+  Facebook layout, paired title/thumbnail workshop. Each writes its own
+  `platformData`; Reels and Shorts reuse the TikTok beat shape as §1 specifies.
+
+  **Steps 5–6.** `modules/strategy/` — engine (best-time and content-type
+  aggregation), predict (band plus reasoning, never a percentage), briefing (the
+  one LLM step), `benchmarks.json` cold start, nightly recompute at
+  `/api/cron/recompute`. The Dashboard card replaces the "AI recommendations"
+  widget the audit found had never existed.
+
+  **Step 7.** `modules/trends/pipeline.ts` fans one `TrendEvent` to five native
+  drafts, `/api/trends/respond`, and a review screen reusing the repurpose
+  pattern. `TrendResponse` rows are written *before* review, so a trend whose
+  five drafts were all rejected is distinguishable from one never run.
+
+  **One real bug, found by the fan-out.** An X thread's rendered body is its
+  tweets joined, and `createPostSchema` measured that against X's 280 — so
+  threads could not be saved at all, from the new composer either. The limit is
+  now shape-aware: multi-part kinds are capped generously overall while each
+  unit is enforced individually in the composer. Before the native shapes
+  existed every post was one unit and this couldn't arise.
+
+  Verified: `smoke` 45/45, `smoke:oauth` 51/51, `smoke:unified` 23/23,
+  `smoke:strategy` 38/38 (new), typecheck, lint, production build, all twelve
+  authenticated routes and the three new API routes answering, and the composer
+  and connection selector confirmed in a browser.
+
+  **Deferred, deliberately:** template-rendered image cards
+  (Platform-Native-Studios.md §3) — the shapes carry `mediaCard` and
+  `thumbnailConcepts` but nothing renders an image yet. Trend sources are still
+  the mock adapter (§2 step 1 says real sources come later). The unified
+  provider's endpoint shapes remain unexercised against Ayrshare itself.
 
 - **Addendum retrofit, session 3 — step 2 (registry + unified adapter).**
   Shipped: `getAdapter(platform, mode)` per §4, with `modeAvailability()` for step
@@ -396,12 +443,12 @@ Not one of the original §13 phases — added after the checklist, on request.
       pulls posts + analytics and **publishes for real** through the provider,
       over one shared client that scopes every call to the connected account.
       Verified by `npm run smoke:unified` (23 checks) against `scripts/fake-unified.ts`.
-- [ ] **Step 3 — connection-type selector** in Settings (Mock / Unified / Direct),
+- [x] **Step 3 — connection-type selector** in Settings (Mock / Unified / Direct),
       Direct shown greyed with a tooltip until that platform's adapter exists.
-- [ ] **Step 4 — native composers** (see Phase 2/3 deltas above)
-- [ ] **Step 5 — engagement-prediction badge** (see Phase 2/3 deltas above)
-- [ ] **Step 6 — Growth Strategist engine** (see Phase 7 delta above)
-- [ ] **Step 7 — Trend Response pipeline** (see Phase 4 delta above)
+- [x] **Step 4 — native composers** (see Phase 2/3 deltas above)
+- [x] **Step 5 — engagement-prediction badge** (see Phase 2/3 deltas above)
+- [x] **Step 6 — Growth Strategist engine** (see Phase 7 delta above)
+- [x] **Step 7 — Trend Response pipeline** (see Phase 4 delta above)
 - [ ] **Unexercised against the real platform APIs.** The full flow is verified
       end to end against `scripts/fake-platform.ts` (51 checks), but no request
       has been made to X, TikTok, Meta or Google — the build environment has no
