@@ -1,8 +1,4 @@
 {
   "framework": "nextjs",
-  "crons": [
-    { "path": "/api/cron/jobs", "schedule": "* * * * *" },
-    { "path": "/api/cron/publish", "schedule": "* * * * *" },
-    { "path": "/api/cron/recompute", "schedule": "0 3 * * *" }
-  ]
+  "crons": [{ "path": "/api/cron/tick", "schedule": "0 3 * * *" }]
 }

@@ -79,7 +79,7 @@ Set these in **Project Settings → Environment Variables** before deploying:
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | |
 | `SOCIALOS_JOIN_ORG_SLUG` | Set to `northwind` so sign-ups land in the seeded demo org. Clear it for real onboarding. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Optional — only to create the five demo logins |
-| `CRON_SECRET` | **Set this.** Three cron endpoints run background work; without a secret they're an unauthenticated way to make the whole system publish, sync and call the model. |
+| `CRON_SECRET` | **Set this.** The cron endpoints run background work; without a secret they're an unauthenticated way to make the whole system publish, sync and call the model. Use the same value for the GitHub Actions secret. |
 
 ### The database sets itself up on deploy
 
@@ -242,11 +242,35 @@ Until recently the app could only act while somebody was looking at it — which
 meant a `SCHEDULED` post never actually published. `modules/jobs` is a durable
 queue in Postgres, drained by cron:
 
-| Cron | Every | Does |
+### Scheduling it
+
+`/api/cron/tick` runs the whole cycle: it enqueues due posts, inbox pulls,
+account syncs and the nightly recompute/relearn/listening work, then drains the
+queue once so a single call takes a due post all the way to published.
+
+**Every step is idempotent** — the enqueue helpers key their work by day, hour
+or bucket. There is no clock branching deciding what "should" run now; the
+idempotency keys *are* the schedule. Calling `tick` every minute does the
+per-minute work every minute and the nightly work once. A missed call costs
+nothing: the next one picks up whatever didn't happen, and the due-post window
+looks an hour backwards.
+
+That property is what lets one endpoint serve every plan:
+
+| How | Cadence | Notes |
 | --- | --- | --- |
-| `/api/cron/publish` | minute | Finds posts whose time has come, moves them to `QUEUED`, enqueues a publish job. Also queues stale account syncs. |
-| `/api/cron/jobs` | minute | Drains the queue — publishes, syncs, recomputes |
-| `/api/cron/recompute` | nightly | Growth Strategist aggregations |
+| `vercel.json` cron | daily | What ships. One cron, daily — the only shape **Vercel's Hobby plan accepts** (2 jobs max, daily only). |
+| `.github/workflows/tick.yml` | 5 min | The real cadence, free and plan-independent. Needs `APP_URL` and `CRON_SECRET` as repo secrets; exits cleanly without them. |
+| `vercel.json` cron on Pro | minute | Change the schedule to `* * * * *`. Nothing else changes. |
+
+> A Hobby-plan account **rejects the deployment outright** if `vercel.json`
+> declares more than two crons or a sub-daily schedule — config validation
+> fails before the build, so you get "Deployment failed" with no build log to
+> read. That is why the scheduled surface is one path rather than three.
+
+The three narrower endpoints still exist for finer control: `/api/cron/publish`
+(enqueue only), `/api/cron/jobs` (drain only), `/api/cron/recompute` (nightly
+aggregations). `tick` is the union of them.
 
 Four properties are deliberate:
 

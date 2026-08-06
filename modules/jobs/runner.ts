@@ -1,4 +1,4 @@
-import { PostStatus } from "@prisma/client";
+import { Platform, PostStatus } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import { handlerFor } from "./handlers";
@@ -124,6 +124,44 @@ export async function enqueueDuePosts(): Promise<{
   });
 
   return { queued, skipped };
+}
+
+/**
+ * Queue the nightly strategy recompute through the queue rather than inline.
+ *
+ * Day-bucketed like the other nightly work, which is what lets `tick` call it
+ * on every invocation without doing it repeatedly — the idempotency key, not a
+ * clock check, is what makes "once a day" true.
+ */
+export async function enqueueStrategyRecompute(): Promise<{ queued: number }> {
+  const since = new Date(Date.now() - 26 * 60 * 60 * 1000);
+  const orgs = await db.organization.findMany({
+    where: {
+      OR: [
+        { connectedAccounts: { some: { lastSyncAt: { gte: since } } } },
+        { posts: { some: { publishedAt: { gte: since } } } },
+      ],
+    },
+    select: { id: true },
+    take: 500,
+  });
+
+  const day = new Date().toISOString().slice(0, 10);
+  const platforms = Object.values(Platform);
+
+  for (const org of orgs) {
+    for (const platform of platforms) {
+      await enqueue({
+        orgId: org.id,
+        kind: "recompute-strategy",
+        payload: { platform },
+        idempotencyKey: `strategy:${org.id}:${platform}:${day}`,
+        maxAttempts: 2,
+      });
+    }
+  }
+
+  return { queued: orgs.length * platforms.length };
 }
 
 /** Queue a refresh for every connected account that hasn't synced recently. */
