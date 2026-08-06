@@ -268,7 +268,16 @@ export async function acceptTrendDraft(
  */
 export async function detectTrends(session: Session, platform: Platform) {
   assertCan(session.role, "ai.generate");
-  const trends = await getPlatformAdapter(platform).fetchTrends();
+
+  // Scoped to the account's region where one is set. What is trending in Lagos
+  // is not what is trending in Los Angeles, and a worldwide list handed to a
+  // local brand is a list of things their audience isn't talking about.
+  const account = await db.connectedAccount.findFirst({
+    where: { orgId: session.orgId, platform },
+    select: { region: true },
+    orderBy: { createdAt: "asc" },
+  });
+  const trends = await getPlatformAdapter(platform).fetchTrends(account?.region);
 
   const created = [];
   for (const trend of trends.slice(0, 5)) {

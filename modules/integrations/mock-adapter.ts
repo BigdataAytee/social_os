@@ -112,15 +112,25 @@ export class MockAdapter implements PlatformAdapter {
     }));
   }
 
-  async fetchTrends(): Promise<Trend[]> {
+  /**
+   * Deterministic per platform per day, and now per region.
+   *
+   * Folding the region into the seed means two countries genuinely rank the
+   * same pool differently rather than showing an identical list with a flag on
+   * it — which is what "region-aware" has to mean before the label is earned.
+   * Volumes are scaled down for a single country, because a national figure
+   * being smaller than the worldwide one is the one thing a reader will check.
+   */
+  async fetchTrends(region?: string | null): Promise<Trend[]> {
     const day = new Date().toISOString().slice(0, 10);
+    const scope = region ?? "WORLD";
     return TREND_POOL[this.platform]
       .map(({ topic, category }) => {
-        const seed = hash(`${this.platform}:${topic}:${day}`);
+        const seed = hash(`${this.platform}:${topic}:${scope}:${day}`);
         return {
           topic,
           category,
-          volume: Math.round(2_000 + seed * 180_000),
+          volume: Math.round((2_000 + seed * 180_000) * (region ? 0.18 : 1)),
           change: Math.round((seed - 0.35) * 180),
         };
       })

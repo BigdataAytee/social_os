@@ -2,6 +2,7 @@ import { Platform } from "@prisma/client";
 
 import type { Session } from "@/lib/auth/session";
 import { db } from "@/lib/db";
+import { localParts } from "@/lib/time";
 import benchmarks from "./benchmarks.json";
 
 /**
@@ -59,6 +60,8 @@ export type BestTimePayload = {
   slots: BestTimeSlot[];
   /** Set when there wasn't enough history and benchmarks were used instead. */
   fallback: string | null;
+  /** The zone the hours are expressed in. Always present, "UTC" when unset. */
+  timezone: string;
 };
 
 export type ContentTypePayload = {
@@ -118,13 +121,28 @@ export async function recomputeBestTimes(
     take: 500,
   });
 
+  // The account's own zone, not the server's. These buckets used to be UTC and
+  // the resulting hour was displayed bare, so "post at 14:00" meant 14:00 UTC
+  // to an audience in Lagos, São Paulo or Los Angeles alike — a recommendation
+  // that was wrong by however far the account sits from Greenwich.
+  const account = await db.connectedAccount.findFirst({
+    where: { orgId, platform },
+    select: { timezone: true },
+    orderBy: { createdAt: "asc" },
+  });
+  const timezone = account?.timezone ?? "UTC";
+
   const freshest = posts[0]?.publishedAt ?? new Date();
 
   if (posts.length < MIN_FOR_OWN_DATA) {
     return {
       platform,
       type: "best-time",
-      payload: { slots: [], fallback: benchmarkFor(platform).bestTimes },
+      payload: {
+        slots: [],
+        fallback: benchmarkFor(platform).bestTimes,
+        timezone,
+      },
       confidence: "low",
       basedOnDataThrough: freshest,
       sampleSize: posts.length,
@@ -133,8 +151,11 @@ export async function recomputeBestTimes(
 
   const buckets = new Map<string, number[]>();
   for (const post of posts) {
-    const key = `${post.publishedAt.getUTCDay()}:${post.publishedAt.getUTCHours()}`;
-    buckets.set(key, [...(buckets.get(key) ?? []), rateOf(post)]);
+    const { day, hour } = localParts(post.publishedAt, timezone);
+    buckets.set(`${day}:${hour}`, [
+      ...(buckets.get(`${day}:${hour}`) ?? []),
+      rateOf(post),
+    ]);
   }
 
   const slots = [...buckets.entries()]
@@ -160,6 +181,9 @@ export async function recomputeBestTimes(
     payload: {
       slots,
       fallback: slots.length === 0 ? benchmarkFor(platform).bestTimes : null,
+      // Carried through so the UI can label the hour. An unlabelled "14:00" is
+      // how the UTC bug stayed invisible.
+      timezone,
     },
     confidence: slots.length === 0 ? "low" : confidenceFor(posts.length),
     basedOnDataThrough: freshest,

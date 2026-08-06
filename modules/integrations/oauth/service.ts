@@ -454,6 +454,15 @@ export async function listAccounts(session: Session, platform?: Platform) {
     connected: account.credential !== null,
     scopes: account.credential?.scopes ?? [],
     expiresAt: account.credential?.expiresAt ?? null,
+    timezone: account.timezone,
+    region: account.region,
+    language: account.language,
+    /** True when this unified connection reads the provider's primary profile
+     *  rather than a per-workspace one. Shown on the card so "connected" isn't
+     *  ambiguous about *which* account it is connected to. */
+    unifiedPrimary:
+      (account.meta as { unifiedPrimary?: boolean } | null)?.unifiedPrimary ===
+      true,
   }));
 }
 

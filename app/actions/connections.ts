@@ -6,6 +6,7 @@ import { ConnectedAccountStatus, IntegrationMode, type Platform } from "@prisma/
 import { assertCan } from "@/lib/auth/permissions";
 import { requireSession } from "@/lib/auth/session";
 import { db } from "@/lib/db";
+import { isValidTimeZone } from "@/lib/time";
 import { logActivity } from "@/modules/activity/service";
 import { syncAccount } from "@/modules/integrations/sync";
 import { toActionResult, type ActionResult } from "./result";
@@ -101,24 +102,61 @@ export async function setConnectionModeAction(input: {
 export async function connectUnifiedAction(input: {
   accountId: string;
   platform: Platform;
-  accountReference: string;
-}): Promise<ActionResult<{ synced: number }>> {
+  /**
+   * Optional. Omitted means "use the provider's primary profile", which is the
+   * one-click case and what a single-brand deployment wants.
+   */
+  accountReference?: string;
+}): Promise<ActionResult<{ synced: number; primary: boolean }>> {
   return toActionResult(async () => {
     const session = await requireSession();
     assertCan(session.role, "integration.manage");
 
-    const reference = input.accountReference.trim();
-    if (!reference) throw new Error("Enter the provider's account reference.");
+    const reference = input.accountReference?.trim() ?? "";
+    const usingPrimary = reference.length === 0;
 
     const account = await db.connectedAccount.findFirst({
       where: { id: input.accountId, orgId: session.orgId },
     });
     if (!account) throw new Error("Account not found");
 
+    // **The guard that makes the one-click path safe.**
+    //
+    // Without a profile key every call answers for the provider's primary
+    // profile. For one brand that is exactly right. For two organizations in
+    // the same deployment it is a cross-tenant read: both would be looking at
+    // whichever account the provider considers primary, and each would believe
+    // it was their own.
+    //
+    // So the simple path stays available right up to the moment it stops being
+    // safe, and then says why rather than silently sharing.
+    if (usingPrimary) {
+      const otherOrg = await db.connectedAccount.findFirst({
+        where: {
+          orgId: { not: session.orgId },
+          integrationMode: IntegrationMode.UNIFIED,
+          credential: { isNot: null },
+          meta: { path: ["unifiedPrimary"], equals: true },
+        },
+        select: { id: true },
+      });
+      if (otherOrg) {
+        throw new Error(
+          "Another workspace in this deployment is already using the provider's primary profile. Create a profile for this workspace with your provider and paste its key below, or you'd both be reading the same account."
+        );
+      }
+    }
+
     // Encrypted exactly like a platform token: §3 is explicit that a provider
     // reference is still sensitive, because it authorises actions on the user's
     // behalf.
     const { sealJson } = await import("@/lib/crypto");
+    // Sealed either way. An empty reference still gets a credential row,
+    // because "connected" is defined across this codebase as "has a
+    // credential" — an account without one is treated as not connected by the
+    // publish path, the sync scheduler and the inbox alike. Special-casing
+    // primary-profile connections as credential-less would mean revisiting
+    // every one of those.
     const sealed = sealJson({ accessToken: reference });
 
     await db.platformCredential.upsert({
@@ -137,6 +175,9 @@ export async function connectUnifiedAction(input: {
         integrationMode: IntegrationMode.UNIFIED,
         status: ConnectedAccountStatus.CONNECTED,
         lastSyncError: null,
+        // Recorded so the guard above can find it, and so the card can say
+        // which profile this account is actually reading.
+        meta: { ...(account.meta as object | null), unifiedPrimary: usingPrimary },
       },
     });
 
@@ -157,6 +198,62 @@ export async function connectUnifiedAction(input: {
 
     revalidatePath("/settings");
     revalidatePath(`/studio/${input.platform.toLowerCase()}`);
-    return { synced };
+    return { synced, primary: usingPrimary };
+  });
+}
+
+/**
+ * Region, timezone and language for one account.
+ *
+ * Stored per account rather than per organization because an agency running a
+ * client's US TikTok and UK Instagram needs different answers for each, and a
+ * single workspace-wide setting would make one of them wrong.
+ *
+ * Validated against the runtime's own ICU data rather than a hand-kept list —
+ * a timezone this process can't resolve would silently fall back to UTC inside
+ * `Intl`, reintroducing the exact bug this field exists to fix.
+ */
+export async function setAccountLocaleAction(input: {
+  accountId: string;
+  timezone: string | null;
+  region: string | null;
+  language: string | null;
+}): Promise<ActionResult<{ timezone: string | null }>> {
+  return toActionResult(async () => {
+    const session = await requireSession();
+    assertCan(session.role, "integration.manage");
+
+    const account = await db.connectedAccount.findFirst({
+      where: { id: input.accountId, orgId: session.orgId },
+      select: { id: true, platform: true },
+    });
+    if (!account) throw new Error("Account not found");
+
+    const timezone = input.timezone?.trim() || null;
+    if (timezone && !isValidTimeZone(timezone)) {
+      throw new Error(`"${timezone}" isn't a timezone this server recognises.`);
+    }
+
+    const region = input.region?.trim().toUpperCase() || null;
+    if (region && !/^[A-Z]{2}$/.test(region)) {
+      throw new Error("Region must be a two-letter country code, like NG or GB.");
+    }
+
+    const language = input.language?.trim() || null;
+
+    const updated = await db.connectedAccount.update({
+      where: { id: account.id },
+      data: { timezone, region, language },
+    });
+
+    await logActivity(session, "integration.locale-set", "account", account.id, {
+      timezone,
+      region,
+      language,
+    });
+
+    revalidatePath("/settings");
+    revalidatePath(`/studio/${account.platform.toLowerCase()}`);
+    return { timezone: updated.timezone };
   });
 }

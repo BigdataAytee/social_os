@@ -96,6 +96,8 @@ export function systemPrompt(opts: {
   profile?: string;
   /** Retrieved from the org's own history by modules/memory. */
   recalled?: string;
+  /** BCP-47 from the connected account. Undefined leaves it to the voice. */
+  language?: string;
 }) {
   const platformSection = opts.platform
     ? `\n\n## Platform\n${PLATFORM_BRIEF[opts.platform]}\nHard character limit: ${CHARACTER_LIMITS[opts.platform]}.`
@@ -108,6 +110,13 @@ export function systemPrompt(opts: {
     ? `\n\n## How this account actually writes\n${opts.profile}`
     : "";
 
+  // Placed after the brand voice and before the platform brief so it reads as
+  // a constraint on the writing rather than a note about the audience — a
+  // language instruction buried at the end gets followed about half the time.
+  const languageSection = opts.language
+    ? `\n\n## Language\nWrite in ${languageName(opts.language)} (${opts.language}). This is the audience's language, not the interface's — do not translate the brief back, and do not add an English version alongside.`
+    : "";
+
   const memorySection = opts.recalled
     ? `\n\n## From their own history\nRelevant things this account has published before, most relevant first. Draw on them for substance and phrasing. Do not copy them, and do not refer to them as if the reader can see this list.\n${opts.recalled}`
     : "";
@@ -115,7 +124,7 @@ export function systemPrompt(opts: {
   return `You are the writing assistant inside SocialOS, working for ${opts.orgName}. You draft social content that a professional social media manager will publish under their own name.
 
 ## Brand voice — follow this exactly
-${brandVoiceBlock(opts.voice)}${platformSection}${profileSection}${memorySection}
+${brandVoiceBlock(opts.voice)}${languageSection}${platformSection}${profileSection}${memorySection}
 
 ## How to write
 Write the content itself. No preamble, no "Here's a draft", no explanation of your choices, no meta-commentary. If you are asked for several options, separate them with a blank line and nothing else — do not number them unless the format calls for numbering.
@@ -123,6 +132,23 @@ Write the content itself. No preamble, no "Here's a draft", no explanation of yo
 Be specific. A concrete number, example, or observation beats a general claim. If the request is too vague to write something specific, write the strongest version you can and note in one short line at the end what detail would sharpen it.
 
 Never invent statistics, quotes, results, or customer names. If a claim needs a number the user has not given you, write around it.`;
+}
+
+/**
+ * A human-readable name for a BCP-47 tag.
+ *
+ * `Intl.DisplayNames` rather than a lookup table — it already knows every tag
+ * this runtime supports, and a hand-kept map would go stale against the picker.
+ * Falls back to the raw tag, which the model reads correctly anyway.
+ */
+function languageName(tag: string): string {
+  try {
+    return (
+      new Intl.DisplayNames(["en"], { type: "language" }).of(tag) ?? tag
+    );
+  } catch {
+    return tag;
+  }
 }
 
 export function userPrompt(opts: {

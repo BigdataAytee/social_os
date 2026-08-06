@@ -1,11 +1,13 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
+import type { Platform } from "@prisma/client";
 
 import { PageHeader } from "@/components/shell/page-placeholder";
 import { StudioShell } from "@/components/studio/studio-shell";
 import { Badge } from "@/components/ui/badge";
 import { can } from "@/lib/auth/permissions";
-import { requireSession } from "@/lib/auth/session";
+import { requireSession, type Session } from "@/lib/auth/session";
+import { db } from "@/lib/db";
 import { getStudio } from "@/lib/studios";
 import { isModelConfigured } from "@/modules/ai/orchestrator";
 import {
@@ -62,7 +64,7 @@ export default async function StudioPage({ params }: Params) {
     listPosts(session, { platform, take: 40 }),
     listIdeas(session, { platform, take: 50 }),
     listCompetitors(session, platform),
-    getPlatformAdapter(platform).fetchTrends(),
+    trendsFor(session, platform),
     getSeries(session, { platform, days: 30 }),
     getTotals(session, { platform, days: 30 }),
     getBestPostingTimes(session, platform),
@@ -138,7 +140,8 @@ export default async function StudioPage({ params }: Params) {
           trends,
           series: series[0] ?? null,
           totals,
-          bestTimes,
+          bestTimes: bestTimes.slots,
+          bestTimesZone: bestTimes.timezone,
           templates: templatesFor(platform),
           campaigns: campaigns.map((c) => ({ id: c.id, name: c.name })),
           briefing,
@@ -162,4 +165,20 @@ export default async function StudioPage({ params }: Params) {
       />
     </div>
   );
+}
+
+/**
+ * Trends for this Studio, scoped to the connected account's region.
+ *
+ * A small helper rather than an inline await so the page's `Promise.all` stays
+ * one list of parallel reads — the region lookup is a second query and would
+ * otherwise serialise the whole block behind it.
+ */
+async function trendsFor(session: Session, platform: Platform) {
+  const account = await db.connectedAccount.findFirst({
+    where: { orgId: session.orgId, platform },
+    select: { region: true },
+    orderBy: { createdAt: "asc" },
+  });
+  return getPlatformAdapter(platform).fetchTrends(account?.region);
 }

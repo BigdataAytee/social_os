@@ -2,6 +2,7 @@ import { Platform } from "@prisma/client";
 
 import type { Session } from "@/lib/auth/session";
 import { db } from "@/lib/db";
+import { localParts } from "@/lib/time";
 
 /**
  * Analytics reads (ARCHITECTURE.md §12). Every chart in the product goes
@@ -172,8 +173,15 @@ export async function getBestPostingTimes(
 
   const accounts = await db.connectedAccount.findMany({
     where: { orgId: session.orgId, ...(platform ? { platform } : {}) },
-    select: { id: true, platform: true },
+    select: { id: true, platform: true, timezone: true },
   });
+
+  // The account's zone, not the server's — see the note in
+  // modules/strategy/engine.ts. Both sites bucket the same way on purpose: the
+  // Studio panel and the Growth Strategist recommend posting times to the same
+  // person, and disagreeing by five hours is worse than either being wrong
+  // alone.
+  const timezone = accounts.find((a) => a.timezone)?.timezone ?? "UTC";
 
   const snapshots = await db.analyticsSnapshot.findMany({
     where: { accountId: { in: accounts.map((a) => a.id) } },
@@ -190,8 +198,7 @@ export async function getBestPostingTimes(
   const buckets = new Map<string, { total: number; count: number }>();
   for (const post of posts) {
     if (!post.publishedAt) continue;
-    const day = post.publishedAt.getUTCDay();
-    const hour = post.publishedAt.getUTCHours();
+    const { day, hour } = localParts(post.publishedAt, timezone);
     const key = `${day}:${hour}`;
     const engagement =
       engagementByDay.get(
@@ -203,12 +210,20 @@ export async function getBestPostingTimes(
     buckets.set(key, bucket);
   }
 
-  return [...buckets.entries()]
-    .map(([key, v]) => {
-      const [day, hour] = key.split(":").map(Number);
-      return { day, hour, score: Math.round(v.total / v.count), posts: v.count };
-    })
-    .sort((a, b) => b.score - a.score);
+  return {
+    timezone,
+    slots: [...buckets.entries()]
+      .map(([key, v]) => {
+        const [day, hour] = key.split(":").map(Number);
+        return {
+          day: day!,
+          hour: hour!,
+          score: Math.round(v.total / v.count),
+          posts: v.count,
+        };
+      })
+      .sort((a, b) => b.score - a.score),
+  };
 }
 
 export async function listConnectedAccounts(session: Session) {

@@ -145,7 +145,15 @@ export interface PlatformAdapter {
     since: Date
   ): Promise<ExternalPostData[]>;
   fetchAnalytics(accountId: string, since: Date): Promise<Snapshot[]>;
-  fetchTrends(): Promise<Trend[]>;
+  /**
+   * Trending topics, optionally scoped to a country.
+   *
+   * `region` is ISO 3166-1 alpha-2. A trending topic is a local fact — what is
+   * trending in Lagos is not what is trending in Los Angeles — so an adapter
+   * that ignores the argument is making a claim about its data, not saving a
+   * parameter.
+   */
+  fetchTrends(region?: string | null): Promise<Trend[]>;
   /**
    * Recent posts with the metrics the platform reports for each.
    *

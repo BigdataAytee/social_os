@@ -87,8 +87,8 @@ export class UnifiedAdapter implements PlatformAdapter {
     this.fallback = new MockAdapter(platform);
   }
 
-  fetchTrends(): Promise<Trend[]> {
-    return this.fallback.fetchTrends();
+  fetchTrends(region?: string | null): Promise<Trend[]> {
+    return this.fallback.fetchTrends(region);
   }
 
   /**

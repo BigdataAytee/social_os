@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Section } from "@/components/ui/section";
 import { StatTile } from "@/components/ui/stat-tile";
 import { requireSession } from "@/lib/auth/session";
+import { zoneAbbreviation } from "@/lib/time";
 import { studioForPlatform } from "@/lib/studios";
 import { formatCompact } from "@/lib/utils";
 import {
@@ -164,13 +165,13 @@ export default async function AnalyticsPage() {
       <div className="grid gap-6 lg:grid-cols-2">
         <Section
           title="Best posting times"
-          description="Ranked by engagement on the days you published"
+          description={`Ranked by engagement on the days you published — times in ${zoneAbbreviation(bestTimes.timezone)}`}
         >
-          {bestTimes.length === 0 ? (
+          {bestTimes.slots.length === 0 ? (
             <EmptyState title="Publish a few posts and this fills in" />
           ) : (
             <div className="flex flex-wrap gap-2">
-              {bestTimes.slice(0, 10).map((slot) => (
+              {bestTimes.slots.slice(0, 10).map((slot) => (
                 <div
                   key={`${slot.day}-${slot.hour}`}
                   className="flex flex-col gap-0.5 rounded-md border border-border bg-surface px-3 py-2"

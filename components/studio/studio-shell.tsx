@@ -37,6 +37,7 @@ import { StatTile } from "@/components/ui/stat-tile";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { createIdeaAction, deleteIdeaAction } from "@/app/actions/workspace";
 import type { Studio } from "@/lib/studios";
+import { zoneAbbreviation } from "@/lib/time";
 import type { PlatformSeries, Totals } from "@/modules/analytics/service";
 import type { Template } from "@/modules/templates/registry";
 import type { Trend } from "@/modules/integrations/types";
@@ -58,6 +59,9 @@ export type StudioShellData = {
   series: PlatformSeries | null;
   totals: Totals;
   bestTimes: { day: number; hour: number; score: number; posts: number }[];
+  /** The zone those hours are in. Rendered next to them — an unlabelled hour
+   *  is how these numbers silently meant UTC to every account. */
+  bestTimesZone: string;
   templates: Template[];
   campaigns: { id: string; name: string }[];
   accounts: StudioAccount[];
@@ -355,7 +359,10 @@ export function StudioShell({
                       className="flex flex-col gap-0.5 rounded-md border border-border bg-surface-raised px-3 py-2"
                     >
                       <span className="font-mono text-xs text-primary">
-                        {DAYS[slot.day]} {String(slot.hour).padStart(2, "0")}:00
+                        {DAYS[slot.day]} {String(slot.hour).padStart(2, "0")}:00{" "}
+                        <span className="text-muted">
+                          {zoneAbbreviation(data.bestTimesZone)}
+                        </span>
                       </span>
                       <span className="font-mono text-[10px] tabular text-muted">
                         {formatCompact(slot.score)} eng · {slot.posts} post

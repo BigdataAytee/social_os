@@ -106,7 +106,8 @@ async function main() {
   );
   ok("30-day window is not over-wide", series.every((s) => s.points.length <= 31), `max ${Math.max(...series.map((s) => s.points.length))}`);
   const best = await getBestPostingTimes(owner);
-  ok("best posting times returns rows", Array.isArray(best) && best.length > 0, `${best.length} rows`);
+  ok("best posting times returns rows", Array.isArray(best.slots) && best.slots.length > 0, `${best.slots.length} rows`);
+  ok("and names the zone its hours are in", typeof best.timezone === "string" && best.timezone.length > 0, best.timezone);
   ok("connected accounts listed", (await listConnectedAccounts(owner)).length === 5);
   ok("competitors listed", (await listCompetitors(owner)).length === 7);
 

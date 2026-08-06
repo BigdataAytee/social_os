@@ -126,8 +126,8 @@ export class LiveAdapter implements PlatformAdapter {
     return this.fallback.publish(post);
   }
 
-  fetchTrends(): Promise<Trend[]> {
-    return this.fallback.fetchTrends();
+  fetchTrends(region?: string | null): Promise<Trend[]> {
+    return this.fallback.fetchTrends(region);
   }
 
   async fetchPosts(accountId: string, since: Date): Promise<ExternalPostData[]> {

@@ -8,6 +8,7 @@ import { toast } from "sonner";
 
 import {
   connectUnifiedAction,
+  setAccountLocaleAction,
   setConnectionModeAction,
 } from "@/app/actions/connections";
 import { disconnectAccountAction } from "@/app/actions/integrations";
@@ -37,6 +38,11 @@ export type ConnectionCardData = {
   connected: boolean;
   lastSyncAt: string | null;
   lastSyncError: string | null;
+  timezone: string | null;
+  region: string | null;
+  language: string | null;
+  /** Reading the provider's primary profile rather than a per-workspace one. */
+  unifiedPrimary: boolean;
 };
 
 export type ModeOption = {
@@ -127,12 +133,20 @@ export function ConnectionCard({
     });
   }
 
+  /**
+   * One click when a reference isn't needed, which is the common case.
+   *
+   * The provider's API key alone answers for its primary profile, so a single
+   * brand doesn't need to know what a profile key is. Passing an empty
+   * reference is the signal; the server decides whether that's safe and refuses
+   * with a reason if another workspace already holds the primary profile.
+   */
   function connectUnified() {
     startTransition(async () => {
       const result = await connectUnifiedAction({
         accountId: account.id,
         platform: account.platform,
-        accountReference: reference,
+        accountReference: reference.trim() || undefined,
       });
       if (!result.ok) {
         toast.error(result.error);
@@ -295,28 +309,61 @@ export function ConnectionCard({
           ) : (
             <>
               <p className="text-xs text-muted">
-                Connect through the provider&rsquo;s own hosted flow, then paste
-                the account reference it gives you back.
+                Your provider key already covers {account.label}. Turn it on and
+                SocialOS reads the account it holds — no OAuth round-trip, no
+                platform review.
               </p>
-              <div className="flex gap-2">
-                <Input
-                  value={reference}
-                  onChange={(event) => setReference(event.target.value)}
-                  placeholder="Provider account reference"
-                  className="font-mono text-xs"
-                />
-                <Button
-                  size="sm"
-                  disabled={pending || reference.trim().length === 0}
-                  onClick={connectUnified}
-                >
-                  {pending ? <Loader2 className="animate-spin" /> : <Link2 />}
-                  Connect
-                </Button>
-              </div>
+              <Button
+                size="sm"
+                className="self-start"
+                disabled={pending}
+                onClick={connectUnified}
+              >
+                {pending ? <Loader2 className="animate-spin" /> : <Link2 />}
+                Turn on {account.label}
+              </Button>
+
+              {/*
+                Only for deployments running several workspaces off one provider
+                account. Folded away because the one-click path is right for
+                almost everyone, and a mandatory field nobody understands is how
+                the previous version made this feel broken.
+              */}
+              <details className="mt-1">
+                <summary className="cursor-pointer text-[11px] text-muted transition-colors hover:text-secondary">
+                  Connecting a specific provider profile?
+                </summary>
+                <div className="mt-2 flex flex-col gap-1.5">
+                  <p className="text-[11px] leading-snug text-muted">
+                    Needed when more than one workspace shares this deployment —
+                    without a profile key each would read the provider&rsquo;s
+                    primary account and believe it was their own.
+                  </p>
+                  <div className="flex gap-2">
+                    <Input
+                      value={reference}
+                      onChange={(event) => setReference(event.target.value)}
+                      placeholder="Provider profile key"
+                      className="font-mono text-xs"
+                    />
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={pending || reference.trim().length === 0}
+                      onClick={connectUnified}
+                    >
+                      Use this profile
+                    </Button>
+                  </div>
+                </div>
+              </details>
             </>
           )}
         </div>
+      )}
+
+      {canManage && account.connected && (
+        <LocaleRow account={account} pending={pending} onSaved={() => router.refresh()} />
       )}
 
       {account.lastSyncError && (
@@ -335,3 +382,235 @@ export function ConnectionCard({
     </div>
   );
 }
+
+
+/**
+ * Where this account's audience is, and when.
+ *
+ * These three are not preferences — each one changes a number the app reports:
+ *
+ *   - **Timezone** decides what "best time to post: 14:00" means. Both the
+ *     Studio panel and the Growth Strategist bucketed published posts by UTC
+ *     hour and rendered the number bare, so that advice was wrong by the
+ *     account's offset for everyone not on Greenwich.
+ *   - **Region** scopes trend discovery. A trending topic is a local fact.
+ *   - **Language** reaches the generation prompt, so drafts come back in the
+ *     audience's language rather than the interface's.
+ *
+ * Per account rather than per workspace: an agency running a client's US TikTok
+ * and UK Instagram needs a different answer for each.
+ */
+function LocaleRow({
+  account,
+  pending,
+  onSaved,
+}: {
+  account: ConnectionCardData;
+  pending: boolean;
+  onSaved: () => void;
+}) {
+  const [timezone, setTimezone] = useState(account.timezone ?? "");
+  const [region, setRegion] = useState(account.region ?? "");
+  const [language, setLanguage] = useState(account.language ?? "");
+  const [saving, startSaving] = useTransition();
+
+  const dirty =
+    timezone !== (account.timezone ?? "") ||
+    region !== (account.region ?? "") ||
+    language !== (account.language ?? "");
+
+  function save() {
+    startSaving(async () => {
+      const result = await setAccountLocaleAction({
+        accountId: account.id,
+        timezone: timezone || null,
+        region: region || null,
+        language: language || null,
+      });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(
+        result.data.timezone
+          ? `Times now read in ${result.data.timezone}`
+          : "Saved — times read in UTC"
+      );
+      onSaved();
+    });
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-border bg-surface-raised px-3 py-2.5">
+      <span className="font-mono text-[10px] uppercase tracking-wider text-muted">
+        Audience
+      </span>
+      <div className="grid gap-2 sm:grid-cols-3">
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] text-muted">Timezone</span>
+          <select
+            value={timezone}
+            onChange={(event) => setTimezone(event.target.value)}
+            className="rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-primary"
+          >
+            <option value="">UTC (default)</option>
+            {TIMEZONES.map((zone) => (
+              <option key={zone} value={zone}>
+                {zone.replace(/_/g, " ")}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] text-muted">Region</span>
+          <select
+            value={region}
+            onChange={(event) => setRegion(event.target.value)}
+            className="rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-primary"
+          >
+            <option value="">Worldwide</option>
+            {REGIONS.map(([code, name]) => (
+              <option key={code} value={code}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] text-muted">Language</span>
+          <select
+            value={language}
+            onChange={(event) => setLanguage(event.target.value)}
+            className="rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-primary"
+          >
+            <option value="">Brand voice decides</option>
+            {LANGUAGES.map(([code, name]) => (
+              <option key={code} value={code}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={!dirty || saving || pending}
+          onClick={save}
+        >
+          {saving && <Loader2 className="animate-spin" />}
+          Save
+        </Button>
+        <span className="text-[11px] text-muted">
+          Timezone decides what &ldquo;best time to post&rdquo; means. Region
+          scopes trends. Language reaches the writer.
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A short list rather than the full IANA set.
+ *
+ * `Intl.supportedValuesOf("timeZone")` returns several hundred entries, which
+ * is a worse control than thirty covering the zones a social team actually
+ * works in. Anything missing can still be stored — the server validates against
+ * the real database, so this list constrains the picker, not the field.
+ */
+const TIMEZONES = [
+  "Africa/Lagos",
+  "Africa/Nairobi",
+  "Africa/Johannesburg",
+  "Africa/Cairo",
+  "Africa/Accra",
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "America/Toronto",
+  "America/Mexico_City",
+  "America/Sao_Paulo",
+  "America/Bogota",
+  "Europe/London",
+  "Europe/Dublin",
+  "Europe/Lisbon",
+  "Europe/Madrid",
+  "Europe/Paris",
+  "Europe/Berlin",
+  "Europe/Amsterdam",
+  "Europe/Warsaw",
+  "Europe/Istanbul",
+  "Europe/Moscow",
+  "Asia/Dubai",
+  "Asia/Karachi",
+  "Asia/Kolkata",
+  "Asia/Dhaka",
+  "Asia/Bangkok",
+  "Asia/Jakarta",
+  "Asia/Singapore",
+  "Asia/Hong_Kong",
+  "Asia/Shanghai",
+  "Asia/Tokyo",
+  "Asia/Seoul",
+  "Australia/Perth",
+  "Australia/Sydney",
+  "Pacific/Auckland",
+];
+
+const REGIONS: [string, string][] = [
+  ["NG", "Nigeria"],
+  ["GH", "Ghana"],
+  ["KE", "Kenya"],
+  ["ZA", "South Africa"],
+  ["EG", "Egypt"],
+  ["US", "United States"],
+  ["CA", "Canada"],
+  ["MX", "Mexico"],
+  ["BR", "Brazil"],
+  ["GB", "United Kingdom"],
+  ["IE", "Ireland"],
+  ["FR", "France"],
+  ["DE", "Germany"],
+  ["ES", "Spain"],
+  ["IT", "Italy"],
+  ["NL", "Netherlands"],
+  ["PL", "Poland"],
+  ["TR", "Turkey"],
+  ["AE", "United Arab Emirates"],
+  ["SA", "Saudi Arabia"],
+  ["IN", "India"],
+  ["PK", "Pakistan"],
+  ["BD", "Bangladesh"],
+  ["ID", "Indonesia"],
+  ["SG", "Singapore"],
+  ["PH", "Philippines"],
+  ["JP", "Japan"],
+  ["KR", "South Korea"],
+  ["CN", "China"],
+  ["AU", "Australia"],
+  ["NZ", "New Zealand"],
+];
+
+const LANGUAGES: [string, string][] = [
+  ["en-GB", "English (UK)"],
+  ["en-US", "English (US)"],
+  ["en-NG", "English (Nigeria)"],
+  ["fr", "French"],
+  ["es", "Spanish"],
+  ["pt-BR", "Portuguese (Brazil)"],
+  ["de", "German"],
+  ["it", "Italian"],
+  ["nl", "Dutch"],
+  ["ar", "Arabic"],
+  ["sw", "Swahili"],
+  ["ha", "Hausa"],
+  ["yo", "Yoruba"],
+  ["ig", "Igbo"],
+  ["hi", "Hindi"],
+  ["id", "Indonesian"],
+  ["ja", "Japanese"],
+  ["ko", "Korean"],
+  ["zh", "Chinese"],
+];

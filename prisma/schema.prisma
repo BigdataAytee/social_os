@@ -198,6 +198,19 @@ model ConnectedAccount {
   /// with getAdapter(account.platform, account.integrationMode).
   integrationMode IntegrationMode?
   meta            Json? // adapter-specific display fields only — never store raw tokens here
+  /// IANA zone, e.g. "Africa/Lagos". Null means UTC.
+  ///
+  /// Not cosmetic: best-posting-times bucketed published posts by their **UTC**
+  /// hour and then displayed the number bare, so "post at 14:00" meant 14:00
+  /// UTC to everyone. For an account whose audience is anywhere else that
+  /// recommendation was simply wrong.
+  timezone        String?
+  /// ISO 3166-1 alpha-2, e.g. "NG". Null means worldwide.
+  /// Scopes trend discovery — a trending topic is a local fact.
+  region          String?
+  /// BCP-47, e.g. "en-GB". Null means the brand voice decides.
+  /// Passed to generation so drafts come back in the audience's language.
+  language        String?
   /// Last successful pull from the platform API. Null means never synced.
   lastSyncAt      DateTime?
   /// Why the last sync failed, if it did. Cleared on the next success.

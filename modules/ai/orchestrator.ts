@@ -73,10 +73,22 @@ async function context(
   platform: Platform | null,
   recallQuery?: string
 ) {
-  const [voice, profile, recalled] = await Promise.all([
+  const [voice, profile, recalled, account] = await Promise.all([
     getBrandVoice(session),
     getBrandProfile(session).catch(() => null),
     recallQuery ? recallFor(session, recallQuery) : Promise.resolve(""),
+    // The account's audience language, where the Studio is known. Best-effort
+    // like the other two: a failed lookup means the brand voice decides, which
+    // is the behaviour that predates the field.
+    platform
+      ? db.connectedAccount
+          .findFirst({
+            where: { orgId: session.orgId, platform },
+            select: { language: true },
+            orderBy: { createdAt: "asc" },
+          })
+          .catch(() => null)
+      : Promise.resolve(null),
   ]);
 
   return systemPrompt({
@@ -85,6 +97,7 @@ async function context(
     orgName: session.orgName,
     profile: brandProfileBlock(profile),
     recalled,
+    language: account?.language ?? undefined,
   });
 }
 
