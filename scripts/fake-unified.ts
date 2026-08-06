@@ -14,6 +14,15 @@ import { createServer, type Server } from "node:http";
 
 export const FAKE_UNIFIED_KEY = "fake-unified-api-key";
 
+/**
+ * What the API key resolves to when no Profile-Key header is sent.
+ *
+ * Named rather than implied, because "no header" is a real and supported
+ * request shape — a single-brand deployment connects this way — and treating it
+ * as an error is what hid a production bug behind a green suite.
+ */
+export const PRIMARY_PROFILE = "primary-profile";
+
 export type FakeUnified = {
   url: string;
   server: Server;
@@ -28,8 +37,8 @@ function historyFor(accountKey: string) {
   const now = Date.now();
   const day = 86_400_000;
 
-  // Only this key's own posts. If the adapter ever forgets the header, the
-  // server answers 400 rather than quietly returning someone else's rows.
+  // Only this key's own posts, so cross-tenant leakage shows up as the wrong
+  // label rather than as silence.
   const label = accountKey === "acct-second" ? "second" : "primary";
 
   const rows: { id: string; text: string; daysAgo: number; video: boolean }[] = [];
@@ -71,10 +80,26 @@ export async function startFakeUnified(): Promise<FakeUnified> {
       return send(401, { message: "Invalid API key" });
     }
 
-    const accountKey = req.headers["profile-key"];
-    if (typeof accountKey !== "string" || !accountKey) {
-      // The whole point of the header. Never answer without it.
-      return send(400, { message: "Profile-Key header is required" });
+    const suppliedKey = req.headers["profile-key"];
+
+    // Mirrors Ayrshare's actual behaviour, which the first version of this fake
+    // did not — and that gap is precisely why a bug reached production:
+    //
+    //   - header absent  → the API key's own primary profile. Legitimate, and
+    //     what a one-click connect relies on.
+    //   - header present but empty → a supplied key that is invalid. Rejected,
+    //     with the message the real provider sends.
+    //
+    // A fake that demanded the header made the empty-header case untestable and
+    // the absent-header case unreachable.
+    if (typeof suppliedKey === "string" && suppliedKey.trim() === "") {
+      return send(401, {
+        message: "The Profile Key is invalid. Please verify correct Profile Key is being used.",
+      });
+    }
+    const accountKey = suppliedKey ?? PRIMARY_PROFILE;
+    if (typeof accountKey !== "string") {
+      return send(400, { message: "Profile-Key must be a single value" });
     }
     seenAccountKeys.push(accountKey);
 

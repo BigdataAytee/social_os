@@ -39,21 +39,31 @@ export class UnifiedNotConfiguredError extends Error {
  * no refresh here, because keeping the platform token alive is the provider's
  * problem once an account is on `UNIFIED` (§3). That is most of the reason to
  * pick unified in the first place.
+ *
+ * **Returns null for a primary-profile connection**, and that distinction is
+ * the whole point. A one-click connect stores an empty reference to mean "use
+ * the provider's primary profile". Sending that as the header value is not the
+ * same as omitting the header: Ayrshare reads an empty `Profile-Key` as a
+ * *supplied and invalid* key and rejects the call outright — which is exactly
+ * what the first real connection did, reporting "The Profile Key is invalid"
+ * for an account that had no profile key by design.
  */
-async function accountKey(accountId: string): Promise<string> {
+async function accountKey(accountId: string): Promise<string | null> {
   const credential = await db.platformCredential.findUnique({
     where: { accountId },
   });
   if (!credential) {
     throw new Error("This account has no stored provider reference — reconnect it.");
   }
+  let stored: string;
   try {
-    return openJson<{ accessToken: string }>(credential).accessToken;
+    stored = openJson<{ accessToken: string }>(credential).accessToken;
   } catch {
     throw new Error(
       "The stored provider reference could not be decrypted. If SOCIALOS_ENCRYPTION_KEY changed, reconnect the account."
     );
   }
+  return stored.trim() === "" ? null : stored;
 }
 
 type RequestOptions = {
@@ -85,7 +95,10 @@ export async function unifiedRequest<T>(opts: RequestOptions): Promise<T> {
   };
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
   if (opts.accountId) {
-    headers[provider.accountKeyHeader] = await accountKey(opts.accountId);
+    // Omitted entirely when there is no profile key — see `accountKey`. An
+    // empty header value is a different request from an absent one.
+    const key = await accountKey(opts.accountId);
+    if (key) headers[provider.accountKeyHeader] = key;
   }
 
   const response = await fetch(url, {

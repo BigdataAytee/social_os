@@ -19,7 +19,7 @@ import { UnifiedAdapter } from "@/modules/integrations/unified/adapter";
 import { syncAccount } from "@/modules/integrations/sync";
 import { getAccountInsights } from "@/modules/insights/service";
 import { publishPost } from "@/modules/posts/service";
-import { FAKE_UNIFIED_KEY, startFakeUnified } from "./fake-unified";
+import { FAKE_UNIFIED_KEY, PRIMARY_PROFILE, startFakeUnified } from "./fake-unified";
 
 let failures = 0;
 let checks = 0;
@@ -143,6 +143,60 @@ async function main() {
     `${fake.seenAccountKeys.length} calls, all scoped`
   );
 
+  console.log("\nOne-click connect: the primary profile");
+  // The path a single-brand deployment actually uses, and the one that reached
+  // production broken. An empty stored reference means "no profile key" — the
+  // header must be *omitted*, not sent empty, because a provider reads an empty
+  // key as a supplied invalid one and rejects the whole call.
+  const primaryAccount = await db.connectedAccount.upsert({
+    where: {
+      orgId_platform_handle: {
+        orgId: session.orgId,
+        // X rather than another network: the fake's history is tagged for one
+        // network, so a different platform would find nothing and the check
+        // would pass or fail for a reason unrelated to the header.
+        platform: Platform.X,
+        handle: "@unified-primary",
+      },
+    },
+    update: { status: "CONNECTED", integrationMode: IntegrationMode.UNIFIED },
+    create: {
+      orgId: session.orgId,
+      platform: Platform.X,
+      handle: "@unified-primary",
+      status: "CONNECTED",
+      integrationMode: IntegrationMode.UNIFIED,
+    },
+  });
+  const emptySeal = sealJson({ accessToken: "" });
+  await db.platformCredential.upsert({
+    where: { accountId: primaryAccount.id },
+    update: { ...emptySeal, externalId: "", scopes: [] },
+    create: {
+      accountId: primaryAccount.id,
+      ...emptySeal,
+      externalId: "",
+      scopes: [],
+    },
+  });
+
+  const callsBefore = fake.seenAccountKeys.length;
+  const primaryResult = await syncAccount(session, primaryAccount.id);
+  ok(
+    "a connection with no profile key syncs rather than being rejected",
+    primaryResult.posts > 0,
+    `${primaryResult.posts} posts`
+  );
+  ok(
+    "and the provider resolved it to its primary profile",
+    fake.seenAccountKeys.slice(callsBefore).every((key) => key === PRIMARY_PROFILE),
+    fake.seenAccountKeys.slice(callsBefore).join(", ") || "no calls"
+  );
+  ok(
+    "an empty key is never sent as the header value",
+    !fake.seenAccountKeys.includes("")
+  );
+
   const rows = await db.externalPost.findMany({ where: { accountId: account.id } });
   ok("posts persisted", rows.length === result.posts);
   ok("video posts classified", rows.some((r) => r.mediaType === "video"));
@@ -189,10 +243,14 @@ async function main() {
   );
 
   console.log("\nCleanup");
-  await db.externalPost.deleteMany({ where: { accountId: account.id } });
+  await db.externalPost.deleteMany({
+    where: { accountId: { in: [account.id, primaryAccount.id] } },
+  });
   await db.post.delete({ where: { id: draft.id } });
-  await db.connectedAccount.delete({ where: { id: account.id } });
-  console.log("  ✓ test account removed");
+  await db.connectedAccount.deleteMany({
+    where: { id: { in: [account.id, primaryAccount.id] } },
+  });
+  console.log("  ✓ test accounts removed");
 
   await fake.close();
   console.log(
