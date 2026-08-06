@@ -109,10 +109,35 @@ const recomputeStrategyJob: JobHandler = async (job) => {
   return { summary: `recomputed ${platform}` };
 };
 
+/**
+ * Re-derive the org's measured voice.
+ *
+ * Batch rather than incremental because the whole profile is a function of the
+ * whole corpus — a median moves when any post is added — and recomputing from
+ * scratch over a thousand rows is cheaper than maintaining running statistics
+ * that can drift.
+ */
+const rebuildBrandProfileJob: JobHandler = async (job) => {
+  const { rebuildBrandProfile } = await import("@/modules/brandbrain/service");
+  const profile = await rebuildBrandProfile(job.orgId);
+  return {
+    summary: `brand profile from ${profile.basedOnPosts} posts, ${profile.contentPillars.length} pillars`,
+  };
+};
+
+/** Rebuild the retrieval corpus. */
+const reindexMemoryJob: JobHandler = async (job) => {
+  const { reindexOrg } = await import("@/modules/memory/service");
+  const { chunks } = await reindexOrg(job.orgId);
+  return { summary: `indexed ${chunks} chunks` };
+};
+
 export const HANDLERS: Record<string, JobHandler> = {
   "publish-post": publishPostJob,
   "sync-account": syncAccountJob,
   "recompute-strategy": recomputeStrategyJob,
+  "rebuild-brand-profile": rebuildBrandProfileJob,
+  "reindex-memory": reindexMemoryJob,
 };
 
 export function handlerFor(kind: string): JobHandler | null {

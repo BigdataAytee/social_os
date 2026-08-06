@@ -155,3 +155,42 @@ export async function enqueueStaleSyncs(
 
   return { queued: accounts.length };
 }
+
+/**
+ * Nightly relearn: rebuild every active org's measured voice and search index.
+ *
+ * "Active" means it has content — an org that has never published has nothing
+ * to learn from, and enqueueing for it burns a job slot to compute zeros.
+ *
+ * Day-bucketed idempotency keys mean the 03:00 cron can fire twice, or be
+ * retried by hand, without doing the work twice.
+ */
+export async function enqueueRelearn(): Promise<{ queued: number }> {
+  const orgs = await db.organization.findMany({
+    where: {
+      OR: [{ posts: { some: {} } }, { externalPosts: { some: {} } }],
+    },
+    select: { id: true },
+    take: 500,
+  });
+
+  const day = new Date().toISOString().slice(0, 10);
+  for (const org of orgs) {
+    await enqueue({
+      orgId: org.id,
+      kind: "rebuild-brand-profile",
+      payload: {},
+      idempotencyKey: `brand-profile:${org.id}:${day}`,
+      maxAttempts: 2,
+    });
+    await enqueue({
+      orgId: org.id,
+      kind: "reindex-memory",
+      payload: {},
+      idempotencyKey: `reindex:${org.id}:${day}`,
+      maxAttempts: 2,
+    });
+  }
+
+  return { queued: orgs.length * 2 };
+}

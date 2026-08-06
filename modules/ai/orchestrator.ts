@@ -10,6 +10,7 @@ import {
   type GenerationType,
 } from "@/lib/validators/ai";
 import { CHARACTER_LIMITS } from "@/lib/validators/platform-data";
+import { brandProfileBlock, getBrandProfile } from "@/modules/brandbrain/service";
 import { getBrandVoice } from "@/modules/brandvoice/service";
 import { createIdea, listIdeas } from "@/modules/ideas/service";
 import {
@@ -17,6 +18,7 @@ import {
   getAccountInsights,
   type AccountInsights,
 } from "@/modules/insights/service";
+import { recall, remember } from "@/modules/memory/service";
 import { createPost, updatePost } from "@/modules/posts/service";
 import { systemPrompt, userPrompt } from "./prompts";
 import {
@@ -56,9 +58,55 @@ const MULTI_PART_TYPES = new Set<GenerationType>([
   "chat",
 ]);
 
-async function context(session: Session, platform: Platform | null) {
-  const voice = await getBrandVoice(session);
-  return systemPrompt({ voice, platform, orgName: session.orgName });
+/**
+ * Assemble the system prompt: stated voice, measured voice, and the org's own
+ * relevant history.
+ *
+ * `recallQuery` is optional and the retrieval is deliberately best-effort —
+ * every failure mode here degrades to the prompt this function returned before
+ * stage 4 existed, rather than failing a generation. A brand profile that can't
+ * be read or a memory index that isn't built yet must not stop someone writing
+ * a post.
+ */
+async function context(
+  session: Session,
+  platform: Platform | null,
+  recallQuery?: string
+) {
+  const [voice, profile, recalled] = await Promise.all([
+    getBrandVoice(session),
+    getBrandProfile(session).catch(() => null),
+    recallQuery ? recallFor(session, recallQuery) : Promise.resolve(""),
+  ]);
+
+  return systemPrompt({
+    voice,
+    platform,
+    orgName: session.orgName,
+    profile: brandProfileBlock(profile),
+    recalled,
+  });
+}
+
+async function recallFor(session: Session, query: string): Promise<string> {
+  try {
+    const hits = await recall(session, query, { take: 5 });
+    return hits
+      .map((hit) => {
+        // The score is the reason the model should weight one over another, so
+        // it is stated rather than merely used for ordering.
+        const performance =
+          hit.score !== null && hit.score > 0
+            ? ` (${hit.score.toFixed(1)}% engagement)`
+            : "";
+        return `- ${hit.text.replace(/\s+/g, " ").slice(0, 280)}${performance}`;
+      })
+      .join("\n");
+  } catch {
+    // Most likely the memory index has never been built for this org. Silence
+    // is correct: the generation proceeds without retrieval.
+    return "";
+  }
 }
 
 /** Every Studio AI feature funnels through here — feature = prompt + type. */
@@ -69,7 +117,10 @@ export async function generate(
   assertCan(session.role, "ai.generate");
   const data = generateSchema.parse(input);
 
-  const system = await context(session, data.studio);
+  // The user's own brief is the retrieval query — it is the best available
+  // description of what they want, and it is what they'd have typed into a
+  // search box if we'd asked them to do the retrieval by hand.
+  const system = await context(session, data.studio, data.input);
 
   // Multi-part formats legitimately exceed a single post's limit; single-post
   // formats do not, and handing back an over-limit draft the composer will
@@ -103,6 +154,17 @@ export async function generate(
       output: result.text,
     },
   });
+
+  // Index as we go, so the corpus stays current without waiting for the nightly
+  // reindex. Awaited rather than fired and forgotten: an unawaited promise in a
+  // serverless function is cancelled the moment the response is sent.
+  await remember({
+    orgId: session.orgId,
+    sourceType: "generation",
+    sourceId: row.id,
+    text: result.text,
+    metadata: { type: data.type, studio: data.studio },
+  }).catch(() => null);
 
   return { id: row.id, output: result.text, source: result.source };
 }
@@ -362,7 +424,18 @@ export async function chat(
 ): Promise<ChatResult> {
   assertCan(session.role, "ai.generate");
 
-  const system = await context(session, opts.studio);
+  // Retrieve against the latest user turn only. Concatenating the whole
+  // conversation would blur the query into every topic discussed so far, and
+  // full-text search rewards a focused query.
+  const latest = [...opts.messages]
+    .reverse()
+    .find((message) => message.role === "user");
+
+  const system = await context(
+    session,
+    opts.studio,
+    typeof latest?.content === "string" ? latest.content : undefined
+  );
   const messages = [...opts.messages];
   const effects: ChatToolEffect[] = [];
 

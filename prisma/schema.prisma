@@ -128,6 +128,8 @@ model Organization {
   externalPosts           ExternalPost[]
   trendEvents             TrendEvent[]
   jobs                    Job[]
+  brandProfile            BrandProfile?
+  memoryChunks            MemoryChunk[]
   strategyRecommendations StrategyRecommendation[]
   posts                   Post[]
   campaigns               Campaign[]
@@ -360,6 +362,70 @@ model StrategyRecommendation {
 
   @@index([orgId, platform, type])
   @@map("strategy_recommendations")
+}
+
+// ==================== BRAND BRAIN & MEMORY ====================
+// OS-ARCHITECTURE.md §11 stage 4. "The AI gets smarter over time" means
+// retrieval and recompute over the org's own data — not training. A new org has
+// no proprietary training data on day one and standing up training
+// infrastructure for that would be disproportionate. Nothing here fine-tunes
+// anything, and no copy should imply otherwise.
+
+/// The voice profile SocialOS *learned*, as opposed to the one you declared.
+///
+/// `BrandVoice` is hand-authored: what you say you sound like. This is
+/// extracted from what you actually published and which of it worked. They are
+/// deliberately separate rows — when they disagree, that disagreement is
+/// information, and merging them would destroy it.
+model BrandProfile {
+  orgId          String   @id
+  /// Words and phrases this org uses far more than baseline, with counts.
+  vocabulary     Json     @default("{}")
+  /// Sentence length, paragraph shape, question rate.
+  sentenceStats  Json     @default("{}")
+  /// Emoji per post, observed rather than declared.
+  emojiRate      Float    @default(0)
+  /// Opening lines of posts that outperformed, as patterns to reuse.
+  hookPatterns   Json     @default("[]")
+  /// Recurring subjects, derived from term frequency across the corpus.
+  contentPillars Json     @default("[]")
+  /// platformData.kind values that beat this org's average.
+  winningFormats Json     @default("[]")
+  /// How many posts this was derived from. Zero means nothing was learned yet,
+  /// and the profile must not be fed to the model as if it had been.
+  basedOnPosts   Int      @default(0)
+  updatedAt      DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("brand_profiles")
+}
+
+/// One retrievable piece of the org's own history.
+///
+/// Deliberately lexical, not vector. Embeddings would need an embeddings
+/// provider this stack doesn't have, and a `vector` column nothing can populate
+/// is worse than honest full-text search: it looks like a working feature.
+/// Postgres full-text over an org's own few thousand posts is genuinely good,
+/// and the upgrade path is one added column plus a backfill job.
+model MemoryChunk {
+  id         String   @id @default(cuid())
+  orgId      String
+  /// "post" | "external-post" | "generation" | "idea" | "briefing"
+  sourceType String
+  sourceId   String
+  text       String
+  metadata   Json     @default("{}")
+  /// Engagement rate where the source had one, so recall can prefer what
+  /// actually worked rather than merely what matched.
+  score      Float?
+  createdAt  DateTime @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, sourceType, sourceId])
+  @@index([orgId, sourceType])
+  @@map("memory_chunks")
 }
 
 // ======================= BACKGROUND WORK =======================

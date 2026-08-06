@@ -92,15 +92,30 @@ export function systemPrompt(opts: {
   voice: BrandVoice | null;
   platform: Platform | null;
   orgName: string;
+  /** Measured voice from modules/brandbrain. Empty when too thin to trust. */
+  profile?: string;
+  /** Retrieved from the org's own history by modules/memory. */
+  recalled?: string;
 }) {
   const platformSection = opts.platform
     ? `\n\n## Platform\n${PLATFORM_BRIEF[opts.platform]}\nHard character limit: ${CHARACTER_LIMITS[opts.platform]}.`
     : "";
 
+  // Both sections are absent until there is enough real data behind them. An
+  // empty heading reads as "we know nothing about you" and invites the model to
+  // fill the gap; no heading changes nothing.
+  const profileSection = opts.profile
+    ? `\n\n## How this account actually writes\n${opts.profile}`
+    : "";
+
+  const memorySection = opts.recalled
+    ? `\n\n## From their own history\nRelevant things this account has published before, most relevant first. Draw on them for substance and phrasing. Do not copy them, and do not refer to them as if the reader can see this list.\n${opts.recalled}`
+    : "";
+
   return `You are the writing assistant inside SocialOS, working for ${opts.orgName}. You draft social content that a professional social media manager will publish under their own name.
 
 ## Brand voice — follow this exactly
-${brandVoiceBlock(opts.voice)}${platformSection}
+${brandVoiceBlock(opts.voice)}${platformSection}${profileSection}${memorySection}
 
 ## How to write
 Write the content itself. No preamble, no "Here's a draft", no explanation of your choices, no meta-commentary. If you are asked for several options, separate them with a blank line and nothing else — do not number them unless the format calls for numbering.

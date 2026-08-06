@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import { ConnectionCard } from "@/components/settings/connection-card";
 import { PageHeader } from "@/components/shell/page-placeholder";
+import { BrandBrainPanel } from "@/components/workspace/brand-brain-panel";
 import { BrandVoiceForm } from "@/components/workspace/brand-voice-form";
 import { Section } from "@/components/ui/section";
 import { can } from "@/lib/auth/permissions";
@@ -13,15 +14,19 @@ import {
   isDirectAvailable,
   modeAvailability,
 } from "@/modules/integrations/registry";
+import { getBrandProfile } from "@/modules/brandbrain/service";
 import { getBrandVoice } from "@/modules/brandvoice/service";
+import { memoryStats } from "@/modules/memory/service";
 
 export const metadata: Metadata = { title: "Settings · SocialOS" };
 
 export default async function SettingsPage() {
   const session = await requireSession();
-  const [voice, accounts] = await Promise.all([
+  const [voice, accounts, profile, memory] = await Promise.all([
     getBrandVoice(session),
     listAccounts(session),
+    getBrandProfile(session),
+    memoryStats(session.orgId),
   ]);
   const canManage = can(session.role, "integration.manage");
 
@@ -82,6 +87,12 @@ export default async function SettingsPage() {
           })}
         </div>
       </Section>
+
+      <BrandBrainPanel
+        profile={profile}
+        memory={memory}
+        canEdit={can(session.role, "brandVoice.edit")}
+      />
 
       <BrandVoiceForm
         canEdit={can(session.role, "brandVoice.edit")}

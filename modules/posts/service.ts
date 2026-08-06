@@ -16,6 +16,7 @@ import {
   type UpdatePostInput,
 } from "@/lib/validators/post";
 import { logActivity } from "@/modules/activity/service";
+import { forget, remember } from "@/modules/memory/service";
 
 /**
  * Post service (ARCHITECTURE.md §6).
@@ -196,6 +197,9 @@ export async function deletePost(session: Session, id: string) {
   if (!existing) throw new Error("Post not found");
 
   await db.post.delete({ where: { id: existing.id } });
+  // A deleted post must leave memory too, or recall keeps surfacing copy the
+  // org has decided it doesn't want to see again.
+  await forget(session.orgId, "post", existing.id).catch(() => null);
   await logActivity(session, "post.deleted", "post", id, {});
 }
 
@@ -245,6 +249,22 @@ export async function publishPost(session: Session, id: string) {
     },
     include: { campaign: true, author: true },
   });
+
+  if (result.ok) {
+    // Indexed on publish, not on create: a draft that never went out is not
+    // part of what this account has said, and treating it as history would let
+    // abandoned copy come back as a retrieval hit.
+    await remember({
+      orgId: session.orgId,
+      sourceType: "post",
+      sourceId: post.id,
+      text: post.body,
+      metadata: {
+        platform: post.platform,
+        kind: (post.platformData as { kind?: string } | null)?.kind ?? null,
+      },
+    }).catch(() => null);
+  }
 
   await logActivity(
     session,

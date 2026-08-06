@@ -3,6 +3,7 @@ import { Platform } from "@prisma/client";
 
 import { cronAuthorized } from "@/lib/cron-auth";
 import { db } from "@/lib/db";
+import { enqueueRelearn } from "@/modules/jobs/runner";
 import { recomputePlatform } from "@/modules/strategy/engine";
 
 export const dynamic = "force-dynamic";
@@ -53,5 +54,16 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ orgs: orgs.length, recomputed, failed });
+  // The brand profile and memory index relearn on the same nightly cadence, but
+  // through the queue rather than inline: they run over every org with content,
+  // not just the recently-active ones, and doing that synchronously here would
+  // blow past maxDuration as the install grows.
+  const relearn = await enqueueRelearn();
+
+  return NextResponse.json({
+    orgs: orgs.length,
+    recomputed,
+    relearnQueued: relearn.queued,
+    failed,
+  });
 }
