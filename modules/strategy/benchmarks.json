@@ -1,0 +1,51 @@
+{
+  "_comment": "Cold-start fallback (Growth-Strategist-Engine.md §3). Hand-authored general best practice, used only when an org has too little history to compute anything. Every recommendation built from this is marked confidence: low, with copy saying so — the alternative is an empty panel or a fabricated number, and both are worse.",
+  "minimumPostsForOwnData": 10,
+  "platforms": {
+    "X": {
+      "bestTimes": "Weekday mornings in your audience's timezone tend to out-perform evenings for text posts; replies land better mid-afternoon.",
+      "contentTypes": "Threads generally out-reach single posts when the first line stands alone. Quote-posts on something already moving beat cold takes.",
+      "practices": [
+        "The first line decides whether anything else gets read — no throat-clearing.",
+        "One idea per tweet in a thread; a tweet that needs the next one to make sense loses people.",
+        "Two or three hashtags at most, and only where they read naturally."
+      ]
+    },
+    "TIKTOK": {
+      "bestTimes": "Near-daily posting outperforms bursty posting for new accounts; consistency matters more than the specific hour early on.",
+      "contentTypes": "Native-feeling footage beats polished ads. Duet/stitch formats borrow reach from something already working.",
+      "practices": [
+        "Lead with the hook, not a logo intro — the first three seconds carry the whole post.",
+        "On-screen text is a core element, not an accessibility afterthought.",
+        "Match a trending sound by pace and mood, not just by popularity."
+      ]
+    },
+    "INSTAGRAM": {
+      "bestTimes": "Late morning and early evening on weekdays are the common peaks; Reels keep circulating for days, so timing matters less for them than for feed posts.",
+      "contentTypes": "Carousels are the explainer format and drive saves; Reels drive reach. Saves and shares matter more than likes.",
+      "practices": [
+        "The cover slide decides whether anyone swipes — write it before the rest of the deck.",
+        "One point per slide.",
+        "Close on something worth saving."
+      ]
+    },
+    "FACEBOOK": {
+      "bestTimes": "Weekday mid-mornings tend to see the most comment activity; groups are more forgiving of timing than pages.",
+      "contentTypes": "Longer conversational posts outperform short broadcast ones. Native text beats link-outs, which suppress reach.",
+      "practices": [
+        "End on an explicit question — the algorithm rewards comments specifically.",
+        "Groups are where the real engagement lives; the page is the storefront.",
+        "Put the substance in the post rather than behind a link."
+      ]
+    },
+    "YOUTUBE": {
+      "bestTimes": "Publishing a day or two ahead of when your audience watches gives the algorithm time to test the video; weekends skew towards longer sessions.",
+      "contentTypes": "Long-form is retention-driven; Shorts are hook-driven and keyword-tagged for search. They serve different jobs.",
+      "practices": [
+        "Design the title and thumbnail together — never generate them separately.",
+        "The cold open has to pay off the title within the first fifteen seconds.",
+        "Chapters help retention and give search something to index."
+      ]
+    }
+  }
+}

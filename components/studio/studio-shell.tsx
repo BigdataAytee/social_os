@@ -22,8 +22,13 @@ import {
   AccountPanel,
   type StudioAccount,
 } from "@/components/studio/account-panel";
-import { Composer } from "@/components/studio/composer";
+import { NativeComposer } from "@/components/studio/composers";
 import { InsightsPanel } from "@/components/studio/insights-panel";
+import { StrategyPanel } from "@/components/studio/strategy-panel";
+import {
+  TrendResponsePanel,
+  type TrendEventRow,
+} from "@/components/studio/trend-response";
 import { STUDIO_FEATURES } from "@/components/studio/features";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -56,6 +61,12 @@ export type StudioShellData = {
   templates: Template[];
   campaigns: { id: string; name: string }[];
   accounts: StudioAccount[];
+  trendEvents: TrendEventRow[];
+  briefing: {
+    narrative: string | null;
+    basedOnDataThrough: string | null;
+    confidence: string | null;
+  };
 };
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -148,12 +159,12 @@ export function StudioShell({
                 onUse={setDraft}
                 modelConfigured={modelConfigured}
               />
-              <Composer
+              <NativeComposer
                 platform={platform}
-                value={draft}
-                onChange={setDraft}
+                seed={draft}
                 campaigns={data.campaigns}
                 canSchedule={canApprove}
+                onConsumed={() => setDraft("")}
               />
             </div>
           </TabsContent>
@@ -205,66 +216,73 @@ export function StudioShell({
 
         {/* ------------------------------------------------------------ trends */}
         <TabsContent value="trends">
-          <div className="grid gap-5 lg:grid-cols-2">
-            <div className="flex flex-col gap-3">
-              <h3 className="font-display text-sm font-medium text-primary">
-                Trending on {studio.label}
-              </h3>
-              <div className="flex flex-col gap-2">
-                {data.trends.map((trend) => (
-                  <div
-                    key={trend.topic}
-                    className="flex items-center gap-3 rounded-md border border-border bg-surface px-3 py-2.5"
-                  >
-                    <span className="min-w-0 flex-1 truncate text-sm text-secondary">
-                      {trend.topic}
-                    </span>
-                    <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider text-muted">
-                      {trend.category}
-                    </span>
-                    <span className="shrink-0 font-mono text-xs tabular text-primary">
-                      {formatCompact(trend.volume)}
-                    </span>
-                    <span
-                      className={`shrink-0 font-mono text-xs tabular ${
-                        trend.change >= 0 ? "text-success" : "text-danger"
-                      }`}
-                    >
-                      {trend.change >= 0 ? "+" : ""}
-                      {trend.change}%
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3">
-              <h3 className="font-display text-sm font-medium text-primary">
-                Tracked competitors
-              </h3>
-              {data.competitors.length === 0 ? (
-                <EmptyState
-                  icon={Users}
-                  title="No competitors tracked yet"
-                  description={`Add ${studio.label} handles to watch what they're publishing.`}
-                />
-              ) : (
+          <div className="flex flex-col gap-6">
+            <TrendResponsePanel
+              platform={platform}
+              events={data.trendEvents}
+              canGenerate={canGenerate}
+            />
+            <div className="grid gap-5 border-t border-border pt-6 lg:grid-cols-2">
+              <div className="flex flex-col gap-3">
+                <h3 className="font-display text-sm font-medium text-primary">
+                  Trending on {studio.label}
+                </h3>
                 <div className="flex flex-col gap-2">
-                  {data.competitors.map((c) => (
+                  {data.trends.map((trend) => (
                     <div
-                      key={c.id}
-                      className="flex flex-col gap-1 rounded-md border border-border bg-surface px-3 py-2.5"
+                      key={trend.topic}
+                      className="flex items-center gap-3 rounded-md border border-border bg-surface px-3 py-2.5"
                     >
-                      <span className="font-mono text-xs text-primary">
-                        {c.handle}
+                      <span className="min-w-0 flex-1 truncate text-sm text-secondary">
+                        {trend.topic}
                       </span>
-                      {c.notes && (
-                        <span className="text-xs text-muted">{c.notes}</span>
-                      )}
+                      <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider text-muted">
+                        {trend.category}
+                      </span>
+                      <span className="shrink-0 font-mono text-xs tabular text-primary">
+                        {formatCompact(trend.volume)}
+                      </span>
+                      <span
+                        className={`shrink-0 font-mono text-xs tabular ${
+                          trend.change >= 0 ? "text-success" : "text-danger"
+                        }`}
+                      >
+                        {trend.change >= 0 ? "+" : ""}
+                        {trend.change}%
+                      </span>
                     </div>
                   ))}
                 </div>
-              )}
+              </div>
+
+              <div className="flex flex-col gap-3">
+                <h3 className="font-display text-sm font-medium text-primary">
+                  Tracked competitors
+                </h3>
+                {data.competitors.length === 0 ? (
+                  <EmptyState
+                    icon={Users}
+                    title="No competitors tracked yet"
+                    description={`Add ${studio.label} handles to watch what they're publishing.`}
+                  />
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {data.competitors.map((c) => (
+                      <div
+                        key={c.id}
+                        className="flex flex-col gap-1 rounded-md border border-border bg-surface px-3 py-2.5"
+                      >
+                        <span className="font-mono text-xs text-primary">
+                          {c.handle}
+                        </span>
+                        {c.notes && (
+                          <span className="text-xs text-muted">{c.notes}</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </TabsContent>
@@ -272,6 +290,13 @@ export function StudioShell({
         {/* --------------------------------------------------------- analytics */}
         <TabsContent value="analytics">
           <div className="flex flex-col gap-5">
+            <StrategyPanel
+              platform={platform}
+              briefing={data.briefing.narrative}
+              basedOnDataThrough={data.briefing.basedOnDataThrough}
+              confidence={data.briefing.confidence}
+              canGenerate={canGenerate}
+            />
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <StatTile
                 label="Followers"

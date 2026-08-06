@@ -1,7 +1,7 @@
 import { Platform, PostStatus } from "@prisma/client";
 import { z } from "zod";
 
-import { CHARACTER_LIMITS } from "./platform-data";
+import { bodyLimitFor } from "./platform-data";
 
 export const createPostSchema = z
   .object({
@@ -12,7 +12,9 @@ export const createPostSchema = z
     campaignId: z.string().nullable().default(null),
     scheduledAt: z.coerce.date().nullable().default(null),
   })
-  .refine((v) => v.body.length <= CHARACTER_LIMITS[v.platform], {
+  // Measured against the limit that applies to *this shape*: a thread's body is
+  // its tweets joined, and each of those is capped individually in the composer.
+  .refine((v) => v.body.length <= bodyLimitFor(v.platform, v.platformData), {
     message: "Body exceeds this platform's character limit",
     path: ["body"],
   })

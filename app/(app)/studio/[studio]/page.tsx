@@ -15,6 +15,8 @@ import {
   listCompetitors,
 } from "@/modules/analytics/service";
 import { listCampaigns } from "@/modules/campaigns/service";
+import { listRecommendations } from "@/modules/strategy/engine";
+import { listTrendEvents } from "@/modules/trends/pipeline";
 import { listIdeas } from "@/modules/ideas/service";
 import {
   connectAvailability,
@@ -54,6 +56,8 @@ export default async function StudioPage({ params }: Params) {
     bestTimes,
     campaigns,
     accounts,
+    trendEvents,
+    recommendations,
   ] = await Promise.all([
     listPosts(session, { platform, take: 40 }),
     listIdeas(session, { platform, take: 50 }),
@@ -64,7 +68,19 @@ export default async function StudioPage({ params }: Params) {
     getBestPostingTimes(session, platform),
     listCampaigns(session),
     listAccounts(session, platform),
+    listTrendEvents(session),
+    listRecommendations(session, platform),
   ]);
+
+  // The briefing is stored, not regenerated per view — it's the one LLM step in
+  // the Growth Strategist and would otherwise cost a model call every page load.
+  const briefingRow = recommendations.find((row) => row.type === "weekly-briefing");
+  const briefing = {
+    narrative:
+      (briefingRow?.payload as { narrative?: string } | null)?.narrative ?? null,
+    basedOnDataThrough: briefingRow?.basedOnDataThrough.toISOString() ?? null,
+    confidence: briefingRow?.confidence ?? null,
+  };
 
   // Three different reasons a platform can't be connected — no encryption key,
   // no OAuth app, or both — each with its own fix, so the reason travels with
@@ -125,6 +141,15 @@ export default async function StudioPage({ params }: Params) {
           bestTimes,
           templates: templatesFor(platform),
           campaigns: campaigns.map((c) => ({ id: c.id, name: c.name })),
+          briefing,
+          trendEvents: trendEvents.map((event) => ({
+            id: event.id,
+            topic: event.topic,
+            summary: event.summary,
+            velocity: event.velocity,
+            depth: event.depth,
+            responses: event.responses.length,
+          })),
           accounts: accounts.map((a) => ({
             id: a.id,
             handle: a.handle,
