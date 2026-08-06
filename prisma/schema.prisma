@@ -132,6 +132,8 @@ model Organization {
   memoryChunks            MemoryChunk[]
   conversations           Conversation[]
   monitors                Monitor[]
+  xPosts                  XPost[]
+  xStories                XStory[]
   strategyRecommendations StrategyRecommendation[]
   posts                   Post[]
   campaigns               Campaign[]
@@ -542,6 +544,134 @@ model InboxMessage {
   @@unique([conversationId, externalId])
   @@index([conversationId, sentAt])
   @@map("inbox_messages")
+}
+
+// ==================== X HUB INTELLIGENCE ENGINE ====================
+// X-HUB.md. A discovery surface over public X content: replies worth reading,
+// news assembled from evidence, gists, trends, viral video.
+//
+// The content source is a seam, not an assumption — see X-HUB.md §1. Every
+// table here is agnostic about whether a row arrived from X's API, a
+// third-party aggregator, or the mock.
+
+enum XStoryKind {
+  /// A post and the reply that outdid it.
+  SAVAGE
+  /// Several posts assembled into a written story with evidence.
+  NEWS
+  /// A story-style summary of a trending conversation.
+  GIST
+  /// A trending topic, explained.
+  TREND
+  /// A video that travelled.
+  VIDEO
+  /// A creator worth watching.
+  CREATOR
+}
+
+/// Why a post is attached to a story. Drives layout as much as meaning: a NEWS
+/// story renders EVIDENCE as a strip, a SAVAGE story renders ORIGINAL above
+/// REPLY.
+enum XPostRole {
+  ORIGINAL
+  REPLY
+  EVIDENCE
+}
+
+/// One public X post, cached.
+///
+/// Cached rather than fetched per render because every module reads the same
+/// posts and the source is rate-limited and — on the tiers that support search —
+/// billed per call. This is also what makes dedupe possible: the same tweet
+/// surfacing in a trend and a news story is one row.
+model XPost {
+  id              String   @id @default(cuid())
+  orgId           String
+  /// X's own id. Unique per org, which is what makes a re-pull an update.
+  externalId      String
+  authorHandle    String
+  authorName      String?
+  authorAvatarUrl String?
+  authorVerified  Boolean  @default(false)
+  text            String
+  /// The thread this belongs to, as X reports it. Null when unknown.
+  conversationId  String?
+  /// The post this replies to, when it is a reply.
+  replyToId       String?
+  permalink       String?
+  /// "video" | "image" | "carousel" | "text" — the same four values
+  /// ExternalPost uses, so format analysis can compare across both.
+  mediaType       String   @default("text")
+  mediaUrls       String[]
+  likes           Int      @default(0)
+  replies         Int      @default(0)
+  reposts         Int      @default(0)
+  views           Int      @default(0)
+  publishedAt     DateTime
+  fetchedAt       DateTime @default(now())
+
+  org     Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  stories XStoryPost[]
+
+  @@unique([orgId, externalId])
+  @@index([orgId, publishedAt])
+  @@index([orgId, conversationId])
+  @@map("x_posts")
+}
+
+model XStory {
+  id        String     @id @default(cuid())
+  orgId     String
+  kind      XStoryKind
+  /// Headline. AI-written for NEWS and GIST, derived for the rest.
+  title     String
+  /// The written story, or the explanation of why a topic trends.
+  summary   String?
+  /// Cover image, when the story has one — the first evidence post's media.
+  coverUrl  String?
+  /// Subjects this story is about, for dedupe and filtering.
+  topics    String[]
+  /// 0–100. How this story ranks against the others on the hub.
+  score     Int        @default(0)
+  /// Component scores, kept so a card can show *why* it ranked. Null members
+  /// mean that signal wasn't available — see X-HUB.md §3.
+  scoring   Json       @default("{}")
+  saved     Boolean    @default(false)
+  savedAt   DateTime?
+  /// Which source produced it, for debugging a hub that looks wrong.
+  source    String     @default("mock")
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  posts XStoryPost[]
+
+  @@index([orgId, kind, score])
+  @@index([orgId, saved])
+  @@map("x_stories")
+}
+
+model XStoryPost {
+  id         String    @id @default(cuid())
+  storyId    String
+  postId     String
+  role       XPostRole
+  /// Order within the story — evidence strips and timelines are ordered.
+  position   Int       @default(0)
+  /// 0–100 each, for a REPLY. Humour and roast are null when no model was
+  /// available; the ranking then runs on the arithmetic signals alone and says
+  /// so, rather than pretending to have judged wit.
+  humour     Int?
+  roast      Int?
+  virality   Int?
+  engagement Int?
+
+  story XStory @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  post  XPost  @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([storyId, postId])
+  @@index([storyId, position])
+  @@map("x_story_posts")
 }
 
 // ======================= BACKGROUND WORK =======================
