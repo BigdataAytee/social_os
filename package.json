@@ -17,6 +17,7 @@
     "smoke:oauth": "tsx scripts/oauth-e2e.ts",
     "smoke:unified": "tsx scripts/unified-e2e.ts",
     "smoke:strategy": "tsx scripts/strategy-e2e.ts",
+    "smoke:jobs": "tsx scripts/jobs-e2e.ts",
     "postinstall": "prisma generate",
     "setup": "prisma migrate deploy && prisma db seed"
   },

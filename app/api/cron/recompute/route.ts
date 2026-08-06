@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { Platform } from "@prisma/client";
 
+import { cronAuthorized } from "@/lib/cron-auth";
 import { db } from "@/lib/db";
 import { recomputePlatform } from "@/modules/strategy/engine";
 
@@ -20,14 +21,8 @@ export const maxDuration = 300;
  * demand from the Studio instead.
  */
 export async function GET(request: NextRequest) {
-  // Vercel signs cron invocations with this header. Without the check the
-  // endpoint is an unauthenticated way to make every org do work.
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = request.headers.get("authorization");
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  if (!cronAuthorized(request)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const since = new Date(Date.now() - 26 * 60 * 60 * 1000);

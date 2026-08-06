@@ -79,6 +79,7 @@ Set these in **Project Settings → Environment Variables** before deploying:
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | |
 | `SOCIALOS_JOIN_ORG_SLUG` | Set to `northwind` so sign-ups land in the seeded demo org. Clear it for real onboarding. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Optional — only to create the five demo logins |
+| `CRON_SECRET` | **Set this.** Three cron endpoints run background work; without a secret they're an unauthenticated way to make the whole system publish, sync and call the model. |
 
 ### The database sets itself up on deploy
 
@@ -162,6 +163,8 @@ app but an unnecessary hazard for migrations and a write-heavy seed. In Vercel,
 | `npm run smoke` | Service-layer suite against a seeded throwaway database |
 | `npm run smoke:oauth` | Connect flow, token refresh, sync and insights against a fake platform |
 | `npm run smoke:unified` | Registry resolution and the unified adapter against a fake provider |
+| `npm run smoke:strategy` | Native shapes, strategy engine, prediction and trend fan-out |
+| `npm run smoke:jobs` | Job queue, retries, and scheduled posts actually publishing |
 
 ## Layout
 
@@ -232,6 +235,34 @@ goes through the mock adapter, unchanged.
 Tokens are encrypted at rest in `platform_credentials` and never leave the
 service layer — `withAccessToken()` hands one to a callback and never returns
 it. Disconnecting deletes the credential and keeps the pulled history.
+
+## Background work
+
+Until recently the app could only act while somebody was looking at it — which
+meant a `SCHEDULED` post never actually published. `modules/jobs` is a durable
+queue in Postgres, drained by cron:
+
+| Cron | Every | Does |
+| --- | --- | --- |
+| `/api/cron/publish` | minute | Finds posts whose time has come, moves them to `QUEUED`, enqueues a publish job. Also queues stale account syncs. |
+| `/api/cron/jobs` | minute | Drains the queue — publishes, syncs, recomputes |
+| `/api/cron/recompute` | nightly | Growth Strategist aggregations |
+
+Four properties are deliberate:
+
+- **Claims can be lost safely.** A worker that dies holding a job releases it
+  after a five-minute lease, rather than stranding it forever.
+- **Retries back off** — 1m, 2m, 4m, 8m, 16m. A platform that just rate-limited
+  us will still be rate-limiting us a second later.
+- **Dead jobs are kept.** A job that gave up is the most interesting row in the
+  table; deleting it hides the outage.
+- **Enqueue is idempotent** on an optional key, so a cron that fires twice can't
+  publish twice. The key for publishing includes the scheduled time, so
+  *rescheduling* a post does queue it again.
+
+A post that fell due more than an hour ago is left `SCHEDULED` and reported
+rather than published late — its moment passed, and that's a decision for a
+person.
 
 ## Checking the app
 

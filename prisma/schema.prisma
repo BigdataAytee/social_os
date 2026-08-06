@@ -48,6 +48,18 @@ enum TaskStatus {
   DONE
 }
 
+/// Where a unit of background work is in its lifecycle
+/// (OS-ARCHITECTURE.md §4, §11 stage 1).
+enum JobStatus {
+  PENDING
+  CLAIMED
+  DONE
+  FAILED
+  /// Out of attempts. Kept, never deleted — a job that gave up is the most
+  /// interesting row in the table and deleting it hides the outage.
+  DEAD
+}
+
 enum ConnectedAccountStatus {
   MOCK // default in v1 — see modules/integrations
   CONNECTED
@@ -80,6 +92,7 @@ model Organization {
   connectedAccounts       ConnectedAccount[]
   externalPosts           ExternalPost[]
   trendEvents             TrendEvent[]
+  jobs                    Job[]
   strategyRecommendations StrategyRecommendation[]
   posts                   Post[]
   campaigns               Campaign[]
@@ -311,6 +324,48 @@ model StrategyRecommendation {
 
   @@index([orgId, platform, type])
   @@map("strategy_recommendations")
+}
+
+// ======================= BACKGROUND WORK =======================
+// OS-ARCHITECTURE.md §11 stage 1. Nothing continuous could exist before this:
+// one nightly cron was the whole of the app's ability to act on its own, which
+// is why SCHEDULED posts never actually fired.
+
+/// One unit of durable background work.
+///
+/// Deliberately a table rather than an external queue service. The work here is
+/// minute-resolution (publish this post, sync this account, run this rule), the
+/// database is already the source of truth, and a row that can be inspected in
+/// psql beats an opaque queue when a customer's post didn't go out. The
+/// `modules/jobs` interface is the seam that makes swapping to a real queue
+/// cheap if sub-minute latency ever matters.
+model Job {
+  id             String    @id @default(cuid())
+  orgId          String
+  /// Which handler runs this — see modules/jobs/handlers.ts.
+  kind           String
+  payload        Json      @default("{}")
+  status         JobStatus @default(PENDING)
+  /// Not before this time. Backoff sets it forward on each retry.
+  runAfter       DateTime  @default(now())
+  attempts       Int       @default(0)
+  maxAttempts    Int       @default(5)
+  /// Set while a worker holds it. A claim older than the lease is reclaimable,
+  /// which is what stops a crashed worker from stranding work forever.
+  claimedAt      DateTime?
+  lastError      String?
+  /// Optional dedupe key: enqueuing the same key twice is a no-op while one is
+  /// still pending. Stops a cron that runs twice from publishing twice.
+  idempotencyKey String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([idempotencyKey])
+  @@index([status, runAfter])
+  @@index([orgId, kind])
+  @@map("jobs")
 }
 
 // ============================ CONTENT ============================

@@ -210,6 +210,39 @@ safety net but is no longer the normal path.
 ## Session log
 *(append a line here at the end of each session — phase worked on, what shipped, what was deferred)*
 
+- **OS evolution — stages 1-2: job runner and publishing queue.** The first two
+  roadmap stages, together because the queue and the thing it exists to fix are
+  one unit.
+
+  Shipped: `modules/jobs` (enqueue with optional idempotency, lease-based claim,
+  exponential backoff to a 16-minute ceiling, dead-letter that keeps failures,
+  manual retry, queue stats), handlers for publish/sync/recompute, and three
+  cron routes behind one shared auth guard. Migration `job_queue`, additive.
+
+  **This closes the gap the audit found: `SCHEDULED` posts now actually fire.**
+  `/api/cron/publish` finds what's due, moves it to `QUEUED` — a status that
+  existed in the enum and had never been set by anything — and enqueues a job;
+  `/api/cron/jobs` drains. A post that fell due over an hour ago is deliberately
+  left `SCHEDULED` and reported rather than published late.
+
+  Three decisions worth knowing. Handlers run as a **system session** carrying
+  OWNER, because the authorisation happened when the human scheduled the post;
+  re-checking an editor's role at publish time would refuse work already
+  approved through the gate. The publish idempotency key includes the scheduled
+  timestamp, so re-running the scheduler can't double-publish but *rescheduling*
+  genuinely re-queues. And attempts are charged on failure rather than on claim,
+  so a worker that crashes before trying anything doesn't burn a retry.
+
+  One fix made after the suite passed: the dedupe path checked the unique
+  constraint by hitting it, which logged a Prisma error on every ordinary
+  scheduler tick — exactly how a team learns to ignore its error log. It looks
+  first now, and keeps the catch for the genuine race.
+
+  Verified: `smoke:jobs` 30/30 (new), plus 45/45, 51/51, 23/23, 38/38 unchanged;
+  typecheck, lint, production build with all three cron routes present.
+
+  Next: stage 3, workspaces and roles.
+
 - **OS evolution — Phase 1 audit and Phase 2 architecture. No code written.**
   The brief asks for the architecture before implementation, which is the right
   order: four of its requirements collide with decisions already shipped here.
