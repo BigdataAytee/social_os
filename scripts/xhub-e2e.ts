@@ -31,6 +31,12 @@ import {
 import { triage } from "@/modules/inbox/triage";
 import { harvest } from "@/modules/xhub/harvest";
 import { suggestions } from "@/modules/xhub/suggestions";
+import {
+  applySuggestion,
+  dismissSuggestion,
+  parseSuggestions,
+  tabSuggestions,
+} from "@/modules/xhub/tab-suggestions";
 import { DELETED_ID, IDS, startFakeSyndication } from "./fake-syndication";
 
 let failures = 0;
@@ -541,6 +547,95 @@ async function main() {
     where: { accountId: account.id, externalId: HARVEST_TAG },
   });
   await db.organization.delete({ where: { id: noAccount.id } });
+
+  console.log("\nThree suggestions on every tab");
+  await db.xSuggestion.deleteMany({ where: { orgId: session.orgId } });
+
+  const savageTab = await tabSuggestions(session, XStoryKind.SAVAGE);
+  ok("a tab arrives with suggestions", savageTab.length >= 1, `${savageTab.length}`);
+  ok("each has something to post", savageTab.every((s) => s.body.length > 5));
+  ok("each says what it was grounded in", savageTab.every((s) => s.why.length > 10),
+    savageTab[0]?.why.slice(0, 60));
+  ok("each has its own accept label", savageTab.every((s) => s.cta.length > 0),
+    savageTab[0]?.cta);
+
+  // Stored, not regenerated: a second read must not make a second model call,
+  // and must not say something different.
+  const reread = await tabSuggestions(session, XStoryKind.SAVAGE);
+  ok(
+    "a second read returns the same batch rather than regenerating",
+    reread.length === savageTab.length &&
+      reread.every((s, i) => s.id === savageTab[i]!.id)
+  );
+
+  // Different tabs ask for different things.
+  const trendTab = await tabSuggestions(session, XStoryKind.TREND);
+  ok("another tab has its own batch", trendTab.length >= 1, `${trendTab.length}`);
+  ok(
+    "with its own accept label",
+    trendTab[0]?.cta !== savageTab[0]?.cta,
+    `${trendTab[0]?.cta} vs ${savageTab[0]?.cta}`
+  );
+  ok(
+    "and its own rows, not the same ones relabelled",
+    trendTab.every((t) => !savageTab.some((sv) => sv.id === t.id))
+  );
+
+  console.log("\nAccepting and dismissing");
+  const first = savageTab[0]!;
+  await applySuggestion(session, first.id);
+  const afterUse = await tabSuggestions(session, XStoryKind.SAVAGE);
+  ok(
+    "a used suggestion stops being offered",
+    !afterUse.some((s) => s.id === first.id)
+  );
+
+  const toDismiss = (await tabSuggestions(session, XStoryKind.TREND))[0]!;
+  await dismissSuggestion(session, toDismiss.id);
+  ok(
+    "a dismissed one stops being offered too",
+    !(await tabSuggestions(session, XStoryKind.TREND)).some(
+      (s) => s.id === toDismiss.id
+    )
+  );
+
+  const otherOrg = await db.organization.create({
+    data: { name: `sug-${Date.now()}`, slug: `sug-${Date.now()}` },
+  });
+  await throws("another org cannot accept your suggestion", () =>
+    applySuggestion({ ...session, orgId: otherOrg.id }, first.id)
+  );
+  await throws("or dismiss it", () =>
+    dismissSuggestion({ ...session, orgId: otherOrg.id }, first.id)
+  );
+  await db.organization.delete({ where: { id: otherOrg.id } });
+
+  console.log("\nParsing what the model returns");
+  ok(
+    "TITLE :: BODY parses",
+    parseSuggestions("Hook idea :: Say the thing")[0]?.title === "Hook idea"
+  );
+  ok(
+    "numbering is stripped — models add it whatever you ask",
+    parseSuggestions("1. Hook idea :: Say the thing")[0]?.title === "Hook idea"
+  );
+  ok(
+    "bullets too",
+    parseSuggestions("- Hook idea :: Say the thing")[0]?.title === "Hook idea"
+  );
+  ok(
+    "a line with no separator is still a suggestion, not a dropped one",
+    parseSuggestions("Just an idea with no separator at all").length === 1
+  );
+  ok(
+    "blank lines between suggestions are ignored",
+    parseSuggestions(
+      "First idea :: do this thing\n\n\nSecond idea :: do that thing"
+    ).length === 2
+  );
+  ok("noise below the length floor is dropped", parseSuggestions("ok\nhi").length === 0);
+
+  await db.xSuggestion.deleteMany({ where: { orgId: session.orgId } });
 
   console.log("\nCleanup");
   await db.xStory.deleteMany({ where: { orgId: session.orgId } });

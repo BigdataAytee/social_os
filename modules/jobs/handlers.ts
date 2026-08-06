@@ -195,9 +195,19 @@ const harvestXHubJob: JobHandler = async (job) => {
   const session = await systemSession(job.orgId);
   const { harvest } = await import("@/modules/xhub/harvest");
   const result = await harvest(session);
+
+  // Suggestions are regenerated in the same job, right after the material they
+  // read. Separating them would leave a window where the hub proposes things
+  // based on a corpus that has just changed underneath it.
+  const { refreshAllTabs } = await import("@/modules/xhub/tab-suggestions");
+  const refreshed = await refreshAllTabs(session).catch(() => ({
+    tabs: 0,
+    suggestions: 0,
+  }));
+
   if (result.note) return { summary: result.note };
   return {
-    summary: `${result.own} own, ${result.mentions} mentions, ${result.rivals} rivals, ${result.stories} stories`,
+    summary: `${result.own} own, ${result.mentions} mentions, ${result.rivals} rivals, ${result.stories} stories, ${refreshed.suggestions} suggestions`,
   };
 };
 

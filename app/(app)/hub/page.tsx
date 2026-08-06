@@ -17,6 +17,7 @@ import {
   visibleTopics,
 } from "@/modules/xhub/stories";
 import { suggestions } from "@/modules/xhub/suggestions";
+import { tabSuggestions } from "@/modules/xhub/tab-suggestions";
 
 export const metadata: Metadata = { title: "X Hub · SocialOS" };
 export const dynamic = "force-dynamic";
@@ -42,6 +43,7 @@ export default async function HubPage() {
     stats,
     saved,
     hubSuggestions,
+    perTab,
   ] =
     await Promise.all([
       listStories(session, { kind: XStoryKind.SAVAGE }),
@@ -54,6 +56,16 @@ export default async function HubPage() {
       hubAnalytics(session),
       listStories(session, { saved: true }),
       suggestions(session),
+      // One read per tab, and only a model call when a batch has aged out.
+      Promise.all(
+        [
+          XStoryKind.SAVAGE,
+          XStoryKind.NEWS,
+          XStoryKind.GIST,
+          XStoryKind.TREND,
+          XStoryKind.VIDEO,
+        ].map(async (kind) => [kind, await tabSuggestions(session, kind)] as const)
+      ).then((entries) => Object.fromEntries(entries)),
     ]);
 
   const serialise = (feed: Awaited<ReturnType<typeof listStories>>) =>
@@ -113,6 +125,7 @@ export default async function HubPage() {
         }))}
         creators={creators}
         stats={stats}
+        tabSuggestions={perTab}
         canAct={can(session.role, "idea.write")}
         canGenerate={can(session.role, "ai.generate")}
         modelConfigured={isModelConfigured()}

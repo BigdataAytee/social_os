@@ -11,6 +11,7 @@ import { db } from "@/lib/db";
 import { listStories } from "@/modules/xhub/service";
 import { deriveTrends } from "@/modules/xhub/stories";
 import { suggestions } from "@/modules/xhub/suggestions";
+import { tabSuggestions } from "@/modules/xhub/tab-suggestions";
 import { getStudio } from "@/lib/studios";
 import { isModelConfigured } from "@/modules/ai/orchestrator";
 import {
@@ -66,6 +67,7 @@ export default async function StudioPage({ params }: Params) {
     hubFeed,
     hubTrends,
     hubSuggestions,
+    hubProposals,
   ] = await Promise.all([
     listPosts(session, { platform, take: 40 }),
     listIdeas(session, { platform, take: 50 }),
@@ -85,6 +87,9 @@ export default async function StudioPage({ params }: Params) {
       : Promise.resolve({ stories: [], nextCursor: null }),
     platform === "X" ? deriveTrends(session, 6) : Promise.resolve([]),
     platform === "X" ? suggestions(session) : Promise.resolve([]),
+    platform === "X"
+      ? tabSuggestions(session, XStoryKind.SAVAGE)
+      : Promise.resolve([]),
   ]);
 
   // The briefing is stored, not regenerated per view — it's the one LLM step in
@@ -174,6 +179,7 @@ export default async function StudioPage({ params }: Params) {
                   })),
                   trends: hubTrends,
                   suggestions: hubSuggestions,
+                  proposals: hubProposals,
                   canAct: can(session.role, "idea.write"),
                   canGenerate: can(session.role, "ai.generate"),
                   modelConfigured: isModelConfigured(),

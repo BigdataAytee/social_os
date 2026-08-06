@@ -8,6 +8,10 @@ import {
   SuggestionsPanel,
   type SuggestionRow,
 } from "@/components/hub/suggestions-panel";
+import {
+  TabSuggestions,
+  type TabSuggestionRow,
+} from "@/components/hub/tab-suggestions";
 import { Badge } from "@/components/ui/badge";
 
 /**
@@ -27,6 +31,8 @@ import { Badge } from "@/components/ui/badge";
 export type StudioHubData = {
   stories: StoryCardData[];
   suggestions: SuggestionRow[];
+  /** Three things to post, generated rather than waited for. */
+  proposals: TabSuggestionRow[];
   trends: { topic: string; posts: number; reach: number }[];
   canAct: boolean;
   canGenerate: boolean;
@@ -42,6 +48,8 @@ export function StudioHubPanel({ hub }: { hub: StudioHubData }) {
         and "here is what to write about, and why" is the whole answer.
       */}
       <SuggestionsPanel suggestions={hub.suggestions} canHarvest={hub.canAct} />
+
+      <TabSuggestions suggestions={hub.proposals} canGenerate={hub.canGenerate} />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">

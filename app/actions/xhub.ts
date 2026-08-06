@@ -8,6 +8,11 @@ import { db } from "@/lib/db";
 import { generate } from "@/modules/ai/orchestrator";
 import { createPost } from "@/modules/posts/service";
 import { harvest } from "@/modules/xhub/harvest";
+import {
+  dismissSuggestion,
+  refreshAllTabs,
+  applySuggestion,
+} from "@/modules/xhub/tab-suggestions";
 import { ingest, listStories, setSaved } from "@/modules/xhub/service";
 import {
   buildGist,
@@ -215,6 +220,68 @@ export async function harvestAction(): Promise<
   return toActionResult(async () => {
     const session = await requireSession();
     const result = await harvest(session);
+    revalidatePath("/hub");
+    revalidatePath("/studio/x");
+    return result;
+  });
+}
+
+
+/**
+ * Accept a suggestion: generate the post it describes, and mark it used.
+ *
+ * Routed through `generate` like every other action here, so the draft carries
+ * brand voice and the measured profile. The suggestion's body is the brief —
+ * the model is finishing a thought the hub already had, not starting one.
+ */
+export async function applySuggestionAction(input: {
+  id: string;
+  body: string;
+  title: string;
+}): Promise<ActionResult<{ output: string; postId: string | null }>> {
+  return toActionResult(async () => {
+    const session = await requireSession();
+
+    const generated = await generate(session, {
+      studio: Platform.X,
+      type: "tweet",
+      input: `${input.title}\n\n${input.body}`,
+      context:
+        "Write the post this describes, ready to publish. No preamble, no explanation of the idea — the idea is the input, the output is the post.",
+    });
+
+    const post = await createPost(session, {
+      platform: Platform.X,
+      body: generated.output.slice(0, 280),
+      status: PostStatus.DRAFT,
+      platformData: {},
+    });
+
+    await applySuggestion(session, input.id);
+    revalidatePath("/hub");
+    revalidatePath("/studio/x");
+    return { output: generated.output, postId: post.id };
+  });
+}
+
+export async function dismissSuggestionAction(input: {
+  id: string;
+}): Promise<ActionResult<{ dismissed: true }>> {
+  return toActionResult(async () => {
+    const session = await requireSession();
+    await dismissSuggestion(session, input.id);
+    revalidatePath("/hub");
+    return { dismissed: true };
+  });
+}
+
+/** Regenerate every tab's suggestions now. */
+export async function refreshSuggestionsAction(): Promise<
+  ActionResult<{ tabs: number; suggestions: number }>
+> {
+  return toActionResult(async () => {
+    const session = await requireSession();
+    const result = await refreshAllTabs(session);
     revalidatePath("/hub");
     revalidatePath("/studio/x");
     return result;

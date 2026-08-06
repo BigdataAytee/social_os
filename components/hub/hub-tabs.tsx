@@ -19,6 +19,10 @@ import {
   buildTrendAction,
 } from "@/app/actions/xhub";
 import { HubBoard, type StoryCardData } from "@/components/hub/hub-board";
+import {
+  TabSuggestions,
+  type TabSuggestionRow,
+} from "@/components/hub/tab-suggestions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -83,6 +87,7 @@ export function HubTabs({
   videos,
   creators,
   stats,
+  tabSuggestions,
   canAct,
   canGenerate,
   modelConfigured,
@@ -97,6 +102,8 @@ export function HubTabs({
   videos: VideoRow[];
   creators: CreatorRow[];
   stats: HubStats;
+  /** Three proposals per tab, keyed by XStoryKind. */
+  tabSuggestions: Record<string, TabSuggestionRow[]>;
   canAct: boolean;
   canGenerate: boolean;
   modelConfigured: boolean;
@@ -115,16 +122,27 @@ export function HubTabs({
       </TabsList>
 
       <TabsContent value="savage">
-        <HubBoard
-          initial={savage}
-          nextCursor={savageCursor}
-          canAct={canAct}
+        <TabSuggestions
+          suggestions={tabSuggestions.SAVAGE ?? []}
           canGenerate={canGenerate}
-          modelConfigured={modelConfigured}
         />
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
+          <HubBoard
+            initial={savage}
+            nextCursor={savageCursor}
+            canAct={canAct}
+            canGenerate={canGenerate}
+            modelConfigured={modelConfigured}
+          />
+          <HubRail trends={trends} news={news} videos={videos} />
+        </div>
       </TabsContent>
 
       <TabsContent value="news">
+        <TabSuggestions
+          suggestions={tabSuggestions.NEWS ?? []}
+          canGenerate={canGenerate}
+        />
         <StoryBuilder kind="news" canGenerate={canGenerate} />
         <StoryList
           stories={news}
@@ -135,6 +153,10 @@ export function HubTabs({
       </TabsContent>
 
       <TabsContent value="gists">
+        <TabSuggestions
+          suggestions={tabSuggestions.GIST ?? []}
+          canGenerate={canGenerate}
+        />
         <StoryBuilder kind="gist" canGenerate={canGenerate} />
         <StoryList
           stories={gists}
@@ -145,6 +167,10 @@ export function HubTabs({
       </TabsContent>
 
       <TabsContent value="trends">
+        <TabSuggestions
+          suggestions={tabSuggestions.TREND ?? []}
+          canGenerate={canGenerate}
+        />
         <TrendsPanel
           trends={trends}
           stories={trendStories}
@@ -154,6 +180,10 @@ export function HubTabs({
       </TabsContent>
 
       <TabsContent value="videos">
+        <TabSuggestions
+          suggestions={tabSuggestions.VIDEO ?? []}
+          canGenerate={canGenerate}
+        />
         <VideosPanel videos={videos} />
       </TabsContent>
 
@@ -174,6 +204,110 @@ export function HubTabs({
         <AnalyticsPanel stats={stats} />
       </TabsContent>
     </Tabs>
+  );
+}
+
+/**
+ * The right rail: what's trending, the latest news item, the top video.
+ *
+ * A digest of the other tabs, beside the one you're on. The mockup put these
+ * here for a reason worth keeping — the tabs are where you work, and the rail is
+ * where you notice something you weren't looking for.
+ *
+ * Every card links to the tab that owns it rather than duplicating its
+ * behaviour, so there is one place each thing can be acted on.
+ */
+function HubRail({
+  trends,
+  news,
+  videos,
+}: {
+  trends: TrendRow[];
+  news: StoryCardData[];
+  videos: VideoRow[];
+}) {
+  const topNews = news[0];
+  const topVideo = videos[0];
+
+  return (
+    <aside className="flex flex-col gap-3">
+      <div className="rounded-lg border border-border bg-surface p-4">
+        <div className="mb-2 flex items-center gap-1.5">
+          <TrendingUp className="h-3.5 w-3.5 text-accent" aria-hidden />
+          <h3 className="font-display text-sm font-medium text-primary">
+            Trending in your hub
+          </h3>
+        </div>
+        {trends.length === 0 ? (
+          <p className="text-xs text-muted">
+            Add posts and subjects start repeating.
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {trends.slice(0, 4).map((trend) => (
+              <li key={trend.topic} className="flex items-baseline gap-2">
+                <span className="min-w-0 flex-1 truncate text-sm text-primary">
+                  {trend.topic}
+                </span>
+                <span className="font-mono text-[10px] text-muted">
+                  {compact(trend.reach)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {topNews && (
+        <div className="rounded-lg border border-border bg-surface p-4">
+          <div className="mb-2 flex items-center gap-1.5">
+            <Newspaper className="h-3.5 w-3.5 text-accent" aria-hidden />
+            <h3 className="font-display text-sm font-medium text-primary">
+              Top news
+            </h3>
+          </div>
+          {topNews.coverUrl && (
+            // Remote media from X's CDN, same reasoning as the story card.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={topNews.coverUrl}
+              alt=""
+              loading="lazy"
+              className="mb-2 h-28 w-full rounded-md border border-border object-cover"
+            />
+          )}
+          <p className="text-sm text-primary">{topNews.title}</p>
+          {topNews.summary && (
+            <p className="mt-1 line-clamp-3 text-xs text-secondary">
+              {topNews.summary}
+            </p>
+          )}
+        </div>
+      )}
+
+      {topVideo && (
+        <div className="rounded-lg border border-border bg-surface p-4">
+          <div className="mb-2 flex items-center gap-1.5">
+            <PlayCircle className="h-3.5 w-3.5 text-accent" aria-hidden />
+            <h3 className="font-display text-sm font-medium text-primary">
+              Viral video
+            </h3>
+          </div>
+          {topVideo.mediaUrls[0] && (
+            <video
+              src={topVideo.mediaUrls[0]}
+              controls
+              preload="none"
+              className="mb-2 w-full rounded-md border border-border"
+            />
+          )}
+          <p className="line-clamp-2 text-sm text-primary">{topVideo.text}</p>
+          <p className="mt-1 font-mono text-[10px] uppercase tracking-wider text-muted">
+            {topVideo.authorHandle} · {compact(topVideo.interactions)}
+          </p>
+        </div>
+      )}
+    </aside>
   );
 }
 

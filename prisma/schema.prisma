@@ -134,6 +134,7 @@ model Organization {
   monitors                Monitor[]
   xPosts                  XPost[]
   xStories                XStory[]
+  xSuggestions            XSuggestion[]
   strategyRecommendations StrategyRecommendation[]
   posts                   Post[]
   campaigns               Campaign[]
@@ -677,6 +678,39 @@ model XStoryPost {
   @@unique([storyId, postId])
   @@index([storyId, position])
   @@map("x_story_posts")
+}
+
+/// An AI-generated thing to post, per hub tab.
+///
+/// Separate from XStory because they answer different questions. A story is
+/// *something that happened* — evidence, collected. A suggestion is *something
+/// to do* — proposed, and either used or dismissed. Folding them together would
+/// mean a feed where observations and proposals sit in one list, which is how a
+/// person stops being able to tell what is real.
+model XSuggestion {
+  id        String     @id @default(cuid())
+  orgId     String
+  /// Which tab this belongs to.
+  tab       XStoryKind
+  title     String
+  /// The suggestion itself — the caption, the meme concept, the thread outline.
+  body      String
+  /// Why it was suggested. Grounded in rows where there are rows, and honest
+  /// about being a cold start where there are not.
+  why       String
+  /// Label for the accept button: "Use this meme", "Use trend".
+  cta       String     @default("Use this")
+  /// Anything the accept action needs — hashtags, a format, a source post id.
+  payload   Json       @default("{}")
+  /// Set when someone acted on it, so the next batch doesn't repeat it.
+  usedAt    DateTime?
+  dismissed Boolean    @default(false)
+  createdAt DateTime   @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, tab, createdAt])
+  @@map("x_suggestions")
 }
 
 // ======================= BACKGROUND WORK =======================
