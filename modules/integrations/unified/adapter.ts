@@ -315,6 +315,24 @@ export class UnifiedAdapter implements PlatformAdapter {
     }
   }
 
+  /**
+   * Delegated to the mock, and this one is a genuine gap rather than a choice.
+   *
+   * Unified providers front *your* connected accounts; none of them offer
+   * "fetch an arbitrary competitor's posts", because that isn't an account they
+   * hold a token for. Throwing would be more honest than delegating — except
+   * that it would make competitor tracking silently worse for the mode this app
+   * steers people toward, so the mock's fixture keeps the feature usable and
+   * this comment keeps it truthful.
+   */
+  fetchCompetitorPosts(
+    accountId: string,
+    handle: string,
+    since: Date
+  ): Promise<ExternalPostData[]> {
+    return this.fallback.fetchCompetitorPosts(accountId, handle, since);
+  }
+
   private async followerCount(accountId: string): Promise<number> {
     try {
       const body = await unifiedRequest<ProviderAnalytics>({

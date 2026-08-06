@@ -27,6 +27,21 @@ export class InboxUnsupportedError extends Error {
   }
 }
 
+/**
+ * Thrown when a platform won't let us read someone else's public content on the
+ * scopes this app holds.
+ *
+ * Same reasoning as `InboxUnsupportedError`: a permanent property of the
+ * connection, not a transient failure, and returning `[]` instead would show a
+ * competitor who apparently posts nothing.
+ */
+export class CompetitorUnsupportedError extends Error {
+  constructor(public readonly reason: string) {
+    super(reason);
+    this.name = "CompetitorUnsupportedError";
+  }
+}
+
 export type Trend = {
   topic: string;
   /** Posts/videos/mentions in the last 24h, as the platform reports it. */
@@ -113,6 +128,22 @@ export interface PlatformAdapter {
     threadId: string,
     text: string
   ): Promise<ReplyResult>;
+  /**
+   * Someone else's public posts, by handle.
+   *
+   * Reuses `ExternalPostData` rather than defining a parallel shape: a
+   * competitor's post has exactly the fields ours does, and the analysis that
+   * compares the two would otherwise have to translate between two structures
+   * that differ only in who wrote them.
+   *
+   * Throws `CompetitorUnsupportedError` where the platform won't allow it on
+   * these scopes — never returns `[]` to mean "can't".
+   */
+  fetchCompetitorPosts(
+    accountId: string,
+    handle: string,
+    since: Date
+  ): Promise<ExternalPostData[]>;
   fetchAnalytics(accountId: string, since: Date): Promise<Snapshot[]>;
   fetchTrends(): Promise<Trend[]>;
   /**

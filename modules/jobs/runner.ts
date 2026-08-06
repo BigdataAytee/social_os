@@ -208,6 +208,52 @@ export async function enqueueInboxSyncs(
 }
 
 /**
+ * Queue a competitor pull and a monitor scan for every org that tracks either.
+ *
+ * Daily rather than every fifteen minutes: a rival's posting habits move over
+ * weeks, and pulling them hourly would spend rate limit on data that hasn't
+ * changed. Monitors scan on the same schedule because a scan over unchanged
+ * corpora finds unchanged matches.
+ */
+export async function enqueueListening(): Promise<{
+  competitors: number;
+  scans: number;
+}> {
+  const [competitors, orgs] = await Promise.all([
+    db.competitor.findMany({ select: { id: true, orgId: true }, take: 500 }),
+    db.organization.findMany({
+      where: { monitors: { some: { active: true } } },
+      select: { id: true },
+      take: 500,
+    }),
+  ]);
+
+  const day = new Date().toISOString().slice(0, 10);
+
+  for (const competitor of competitors) {
+    await enqueue({
+      orgId: competitor.orgId,
+      kind: "sync-competitor",
+      payload: { competitorId: competitor.id },
+      idempotencyKey: `competitor:${competitor.id}:${day}`,
+      maxAttempts: 2,
+    });
+  }
+
+  for (const org of orgs) {
+    await enqueue({
+      orgId: org.id,
+      kind: "scan-monitors",
+      payload: {},
+      idempotencyKey: `scan:${org.id}:${day}`,
+      maxAttempts: 2,
+    });
+  }
+
+  return { competitors: competitors.length, scans: orgs.length };
+}
+
+/**
  * Nightly relearn: rebuild every active org's measured voice and search index.
  *
  * "Active" means it has content — an org that has never published has nothing

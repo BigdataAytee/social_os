@@ -154,6 +154,36 @@ const wakeSnoozedJob: JobHandler = async () => {
   return { summary: `woke ${woken} conversations` };
 };
 
+/** Pull one competitor's recent posts. */
+const syncCompetitorJob: JobHandler = async (job) => {
+  const competitorId = String(
+    (job.payload as { competitorId?: string }).competitorId ?? ""
+  );
+  if (!competitorId) throw new Error("sync-competitor job has no competitorId");
+
+  const session = await systemSession(job.orgId);
+  const { syncCompetitor } = await import("@/modules/competitors/service");
+  const result = await syncCompetitor(session, competitorId);
+
+  if (result.unsupported) return { summary: `not supported: ${result.unsupported}` };
+  return { summary: `${result.posts} posts` };
+};
+
+/**
+ * Re-run every monitor for one org.
+ *
+ * After the competitor sync rather than before, in scheduling order: a scan
+ * that runs first would miss everything pulled a minute later, and monitors are
+ * the surface people check to decide whether to act.
+ */
+const scanMonitorsJob: JobHandler = async (job) => {
+  const { scanMonitors } = await import("@/modules/listening/service");
+  const result = await scanMonitors(job.orgId);
+  return {
+    summary: `${result.scanned} monitors, ${result.matched} matches`,
+  };
+};
+
 /** Rebuild the retrieval corpus. */
 const reindexMemoryJob: JobHandler = async (job) => {
   const { reindexOrg } = await import("@/modules/memory/service");
@@ -169,6 +199,8 @@ export const HANDLERS: Record<string, JobHandler> = {
   "reindex-memory": reindexMemoryJob,
   "sync-inbox": syncInboxJob,
   "wake-snoozed": wakeSnoozedJob,
+  "sync-competitor": syncCompetitorJob,
+  "scan-monitors": scanMonitorsJob,
 };
 
 export function handlerFor(kind: string): JobHandler | null {

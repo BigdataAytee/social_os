@@ -3,7 +3,7 @@ import { Platform, type Post } from "@prisma/client";
 import { db } from "@/lib/db";
 import { MockAdapter } from "./mock-adapter";
 import { withAccessToken } from "./oauth/service";
-import { InboxUnsupportedError } from "./types";
+import { CompetitorUnsupportedError, InboxUnsupportedError } from "./types";
 import type {
   ExternalPostData,
   InboxItemData,
@@ -212,6 +212,152 @@ export class LiveAdapter implements PlatformAdapter {
       error:
         "This connection is read-only. Replying needs write scopes and platform review — switch this account to a Unified connection, or reply on the platform.",
     };
+  }
+
+  /**
+   * A competitor's public posts.
+   *
+   * Two of the five. X allows a lookup by username followed by that user's
+   * timeline on `tweet.read` + `users.read`; YouTube allows channel search and
+   * public video statistics on `youtube.readonly`. Meta does not let an app read
+   * an arbitrary Page it doesn't administer, and TikTok has no public-profile
+   * endpoint on these scopes — both throw rather than reporting a rival who
+   * apparently posts nothing.
+   */
+  async fetchCompetitorPosts(
+    accountId: string,
+    handle: string,
+    since: Date
+  ): Promise<ExternalPostData[]> {
+    if (this.platform === Platform.FACEBOOK || this.platform === Platform.INSTAGRAM) {
+      throw new CompetitorUnsupportedError(
+        "Meta only exposes Pages your app administers — a competitor's Page can't be read on these scopes."
+      );
+    }
+    if (this.platform === Platform.TIKTOK) {
+      throw new CompetitorUnsupportedError(
+        "TikTok has no public-profile endpoint on the scopes this app requests."
+      );
+    }
+
+    const clean = handle.replace(/^@/, "").trim();
+    if (!clean) return [];
+
+    return withAccessToken(accountId, async (token) =>
+      this.platform === Platform.X
+        ? this.xCompetitor(token, clean, since)
+        : this.youtubeCompetitor(token, clean, since)
+    );
+  }
+
+  private async xCompetitor(
+    token: string,
+    username: string,
+    since: Date
+  ): Promise<ExternalPostData[]> {
+    const lookup = await apiGet<{ data?: { id: string } }>(
+      `${apiBase(Platform.X)}/users/by/username/${encodeURIComponent(username)}`,
+      token
+    );
+    const userId = lookup.data?.id;
+    if (!userId) return [];
+
+    const url = new URL(`${apiBase(Platform.X)}/users/${userId}/tweets`);
+    url.searchParams.set("max_results", "100");
+    url.searchParams.set("start_time", since.toISOString());
+    url.searchParams.set("tweet.fields", "created_at,public_metrics,text,attachments");
+
+    const body = await apiGet<{
+      data?: {
+        id: string;
+        text: string;
+        created_at: string;
+        public_metrics?: Record<string, number>;
+        attachments?: { media_keys?: string[] };
+      }[];
+    }>(url.toString(), token);
+
+    return (body.data ?? []).map((tweet) => {
+      const metrics = tweet.public_metrics ?? {};
+      const media = tweet.attachments?.media_keys?.length ?? 0;
+      return {
+        externalId: tweet.id,
+        permalink: `https://x.com/${username}/status/${tweet.id}`,
+        text: tweet.text,
+        mediaType: media > 1 ? "carousel" : media === 1 ? "image" : "text",
+        publishedAt: new Date(tweet.created_at),
+        likes: metrics.like_count ?? 0,
+        comments: metrics.reply_count ?? 0,
+        shares: metrics.retweet_count ?? 0,
+        views: metrics.impression_count ?? 0,
+        metrics: {},
+      } satisfies ExternalPostData;
+    });
+  }
+
+  private async youtubeCompetitor(
+    token: string,
+    handle: string,
+    since: Date
+  ): Promise<ExternalPostData[]> {
+    // A handle resolves to a channel; a channel's uploads live in a playlist
+    // whose id is the channel id with the second character changed. That is
+    // Google's documented convention, not a trick — but going through
+    // `search.list` instead costs a hundred quota units per call against
+    // `playlistItems.list`'s one.
+    const channels = await apiGet<{
+      items?: { id: string }[];
+    }>(
+      `${apiBase(Platform.YOUTUBE)}/channels?part=id&forHandle=${encodeURIComponent(
+        handle.startsWith("@") ? handle : `@${handle}`
+      )}`,
+      token
+    );
+    const channelId = channels.items?.[0]?.id;
+    if (!channelId) return [];
+
+    const uploads = `UU${channelId.slice(2)}`;
+    const playlist = await apiGet<{
+      items?: { contentDetails?: { videoId?: string; videoPublishedAt?: string } }[];
+    }>(
+      `${apiBase(Platform.YOUTUBE)}/playlistItems?part=contentDetails&maxResults=50&playlistId=${uploads}`,
+      token
+    );
+
+    const recent = (playlist.items ?? []).filter((item) => {
+      const at = item.contentDetails?.videoPublishedAt;
+      return Boolean(item.contentDetails?.videoId) && at && new Date(at) >= since;
+    });
+    if (recent.length === 0) return [];
+
+    const ids = recent
+      .map((item) => item.contentDetails!.videoId!)
+      .join(",");
+    const videos = await apiGet<{
+      items?: {
+        id: string;
+        snippet?: { title?: string; description?: string; publishedAt?: string };
+        statistics?: Record<string, string>;
+      }[];
+    }>(
+      `${apiBase(Platform.YOUTUBE)}/videos?part=snippet,statistics&id=${ids}`,
+      token
+    );
+
+    return (videos.items ?? []).map((video) => ({
+      externalId: video.id,
+      permalink: `https://www.youtube.com/watch?v=${video.id}`,
+      text: [video.snippet?.title, video.snippet?.description]
+        .filter(Boolean)
+        .join("\n\n"),
+      mediaType: "video" as const,
+      publishedAt: new Date(video.snippet?.publishedAt ?? Date.now()),
+      likes: Number(video.statistics?.likeCount ?? 0),
+      comments: Number(video.statistics?.commentCount ?? 0),
+      shares: 0,
+      views: Number(video.statistics?.viewCount ?? 0),
+      metrics: {},
+    }));
   }
 
   private async xMentions(

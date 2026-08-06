@@ -1,5 +1,6 @@
 import type { Session } from "@/lib/auth/session";
 import { db } from "@/lib/db";
+import { STOP_WORDS, extractTerms, words } from "./terms";
 
 /**
  * Brand Brain — the voice this org *actually has*, measured (OS-ARCHITECTURE.md
@@ -45,19 +46,6 @@ export type BrandProfileShape = {
   winningFormats: { kind: string; lift: number }[];
   basedOnPosts: number;
 };
-
-/**
- * Words that carry no voice signal. Deliberately short: an aggressive stop list
- * would strip the domain terms that *are* the voice. "Growth", "audience" and
- * "funnel" tell you what an account is about; "the" and "and" do not.
- */
-const STOP_WORDS = new Set(
-  ("a an and are as at be been but by can do does for from had has have he her " +
-    "here his how i if in into is it its just like me more most my no not of " +
-    "on one or our out over she so some than that the their them then there " +
-    "these they this to too up us was we were what when where which who why " +
-    "will with would you your yours dont doesnt im ive youre thats its").split(" ")
-);
 
 const EMOJI = /\p{Extended_Pictographic}/gu;
 
@@ -243,15 +231,6 @@ export function brandProfileBlock(profile: BrandProfileShape | null): string {
 
 // ------------------------------------------------------------- the arithmetic
 
-function words(text: string): string[] {
-  return text
-    .toLowerCase()
-    .replace(/https?:\/\/\S+/g, " ")
-    .replace(/[^\p{L}\p{N}'\s-]/gu, " ")
-    .split(/\s+/)
-    .filter(Boolean);
-}
-
 /**
  * Terms this org uses often, excluding filler.
  *
@@ -359,45 +338,12 @@ function firstLine(text: string): string {
 /**
  * Recurring subjects.
  *
- * Bigrams as well as single words, because "content strategy" is a pillar and
- * "content" plus "strategy" separately are not. Ranked by document frequency —
- * a pillar is something they come back to across posts.
+ * Delegated to `terms.ts` because competitor gap analysis asks the same
+ * question of a rival's corpus, and a gap is only meaningful if both sides were
+ * measured identically.
  */
 function contentPillars(texts: string[]): string[] {
-  if (texts.length < 4) return [];
-
-  const documents = new Map<string, number>();
-  for (const text of texts) {
-    const tokens = words(text).filter(
-      (word) => word.length >= 4 && !STOP_WORDS.has(word)
-    );
-    const seen = new Set<string>();
-    for (let i = 0; i < tokens.length; i++) {
-      seen.add(tokens[i]!);
-      if (i + 1 < tokens.length) seen.add(`${tokens[i]} ${tokens[i + 1]}`);
-    }
-    for (const term of seen) {
-      documents.set(term, (documents.get(term) ?? 0) + 1);
-    }
-  }
-
-  const floor = Math.max(2, Math.ceil(texts.length * 0.05));
-  const ranked = [...documents.entries()]
-    .filter(([, count]) => count >= floor)
-    // A bigram beats its own parts at equal frequency: it says more.
-    .sort((a, b) => b[1] - a[1] || b[0].length - a[0].length);
-
-  const pillars: string[] = [];
-  for (const [term] of ranked) {
-    // Skip anything already covered by a pillar we kept — otherwise the list is
-    // "content", "content strategy", "strategy" three times over.
-    if (pillars.some((kept) => kept.includes(term) || term.includes(kept))) {
-      continue;
-    }
-    pillars.push(term);
-    if (pillars.length === 6) break;
-  }
-  return pillars;
+  return extractTerms(texts).map((term) => term.term);
 }
 
 /**

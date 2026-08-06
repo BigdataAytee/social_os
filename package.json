@@ -21,6 +21,7 @@
     "smoke:workspaces": "tsx scripts/workspaces-e2e.ts",
     "smoke:brain": "tsx scripts/brain-e2e.ts",
     "smoke:inbox": "tsx scripts/inbox-e2e.ts",
+    "smoke:listening": "tsx scripts/listening-e2e.ts",
     "postinstall": "prisma generate",
     "setup": "prisma migrate deploy && prisma db seed"
   },

@@ -131,6 +131,7 @@ model Organization {
   brandProfile            BrandProfile?
   memoryChunks            MemoryChunk[]
   conversations           Conversation[]
+  monitors                Monitor[]
   strategyRecommendations StrategyRecommendation[]
   posts                   Post[]
   campaigns               Campaign[]
@@ -658,17 +659,128 @@ model Asset {
 // ======================= COMPETITIVE INTEL =======================
 
 model Competitor {
-  id        String   @id @default(cuid())
-  orgId     String
-  platform  Platform
-  handle    String
-  notes     String?
-  createdAt DateTime @default(now())
+  id            String    @id @default(cuid())
+  orgId         String
+  platform      Platform
+  handle        String
+  notes         String?
+  /// Name as the platform shows it, filled in on the first sync.
+  displayName   String?
+  /// Last successful pull of their content. Null means never synced.
+  lastSyncAt    DateTime?
+  /// Why the last pull failed, if it did. Cleared on the next success.
+  lastSyncError String?
+  createdAt     DateTime  @default(now())
 
-  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  org   Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  posts CompetitorPost[]
 
   @@unique([orgId, platform, handle])
   @@map("competitors")
+}
+
+/// A competitor's post, pulled from the platform.
+///
+/// A separate table from ExternalPost rather than a nullable `competitorId` on
+/// it: ExternalPost hangs off a ConnectedAccount and every query against it
+/// means "our content". Folding someone else's posts in would silently change
+/// what every existing insight is computed over — the Growth Strategist would
+/// start benchmarking us against a corpus that included our rivals.
+model CompetitorPost {
+  id           String   @id @default(cuid())
+  orgId        String
+  competitorId String
+  externalId   String
+  text         String
+  mediaType    String
+  permalink    String?
+  publishedAt  DateTime
+  likes        Int      @default(0)
+  comments     Int      @default(0)
+  shares       Int      @default(0)
+  views        Int      @default(0)
+  fetchedAt    DateTime @default(now())
+
+  competitor Competitor @relation(fields: [competitorId], references: [id], onDelete: Cascade)
+
+  @@unique([competitorId, externalId])
+  @@index([orgId, publishedAt])
+  @@map("competitor_posts")
+}
+
+// ====================== SOCIAL LISTENING ======================
+// OS-ARCHITECTURE.md §11 stage 6.
+//
+// Listening here means "over everything we can legitimately see" — the
+// engagement inbox, our own synced posts, and tracked competitors' posts. None
+// of the five platforms exposes open search on the scopes this app requests, so
+// a monitor that claimed to watch all of X would be watching nothing. What it
+// does watch is real, and the UI says which.
+
+enum MonitorKind {
+  /// A topic or phrase to watch generally.
+  KEYWORD
+  /// Our own name, handle or product. Matches here are reputation.
+  BRAND
+  /// A rival's name, mentioned by anyone.
+  COMPETITOR
+}
+
+model Monitor {
+  id        String      @id @default(cuid())
+  orgId     String
+  term      String
+  kind      MonitorKind @default(KEYWORD)
+  /// Null watches every platform.
+  platform  Platform?
+  active    Boolean     @default(true)
+  createdAt DateTime    @default(now())
+
+  org      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  mentions Mention[]
+
+  @@unique([orgId, term, kind])
+  @@index([orgId, active])
+  @@map("monitors")
+}
+
+/// Where a mention was found. Named after the source rather than the platform
+/// because the platform is already on the row — this says how we came to see it,
+/// which is what decides whether it can be replied to.
+enum MentionSource {
+  /// A comment, mention or DM in the engagement inbox. Actionable — there is a
+  /// thread to reply into.
+  INBOX
+  /// One of our own synced posts. We said it.
+  OWN_POST
+  /// A tracked competitor's post. Observation only.
+  COMPETITOR
+}
+
+model Mention {
+  id           String        @id @default(cuid())
+  orgId        String
+  monitorId    String
+  source       MentionSource
+  platform     Platform
+  /// The conversation, external post or competitor post this came from, so the
+  /// UI can link back to the thing itself rather than a copy of its text.
+  sourceId     String
+  authorHandle String
+  text         String
+  permalink    String?
+  sentiment    Sentiment     @default(NEUTRAL)
+  /// Likes + comments + shares where the source reports them, so a mention on a
+  /// post nobody saw doesn't rank with one that reached thousands.
+  reach        Int           @default(0)
+  publishedAt  DateTime
+  createdAt    DateTime      @default(now())
+
+  monitor Monitor @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+
+  @@unique([monitorId, source, sourceId])
+  @@index([orgId, publishedAt])
+  @@map("mentions")
 }
 
 // =========================== BRAND VOICE ===========================

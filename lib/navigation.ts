@@ -3,6 +3,7 @@ import {
   Calendar,
   FolderOpen,
   Inbox,
+  Radar,
   LayoutDashboard,
   Settings,
   Sparkles,
@@ -43,6 +44,7 @@ export const WORKSPACE_NAV: NavItem[] = [
   { href: "/calendar", label: "Calendar", icon: Calendar },
   { href: "/assets", label: "Asset Library", icon: FolderOpen },
   { href: "/assistant", label: "AI Assistant", icon: Sparkles },
+  { href: "/listening", label: "Listening", icon: Radar },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
 ];
 

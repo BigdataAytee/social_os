@@ -270,7 +270,88 @@ export class MockAdapter implements PlatformAdapter {
     if (!text.trim()) return { ok: false, error: "A reply can't be empty" };
     return { ok: true, externalId: `mock_reply_${hash(threadId + text).toString(36).slice(2, 12)}` };
   }
+
+  /**
+   * A competitor's posts, generated deterministically from their handle.
+   *
+   * Unlike `fetchPosts`, there is nothing real to derive these from — we have no
+   * copy of a rival's content. So they are invented, but invented to be *usable*
+   * for the thing competitor intelligence is for: the topics differ from the
+   * demo org's own, and engagement varies by format, so gap analysis and
+   * benchmarking have something to find rather than a flat corpus that makes
+   * every comparison read "no difference".
+   */
+  async fetchCompetitorPosts(
+    accountId: string,
+    handle: string,
+    since: Date
+  ): Promise<ExternalPostData[]> {
+    const days = Math.max(
+      1,
+      Math.min(90, Math.round((Date.now() - since.getTime()) / 86_400_000))
+    );
+    const base = hash(`competitor:${this.platform}:${handle}`);
+    // Between four and twelve posts in the window: some rivals post daily and
+    // some barely at all, and cadence is one of the things being compared.
+    const count = Math.max(4, Math.min(12, Math.round(4 + base * 8)));
+
+    return Array.from({ length: count }, (_, index) => {
+      const seed = hash(`${handle}:${index}`);
+      const topic = COMPETITOR_TOPICS[
+        Math.floor(hash(`${handle}:topic:${index}`) * COMPETITOR_TOPICS.length)
+      ]!;
+      const mediaType: ExternalPostData["mediaType"] =
+        this.platform === Platform.TIKTOK || this.platform === Platform.YOUTUBE
+          ? "video"
+          : seed > 0.72
+            ? "carousel"
+            : seed > 0.4
+              ? "image"
+              : "text";
+
+      const views = Math.round(3_000 + seed * 40_000);
+      // Carousels over-perform in this fixture, deliberately: the format
+      // comparison should have a real winner to find.
+      const rate = (0.01 + seed * 0.05) * (mediaType === "carousel" ? 1.6 : 1);
+      const interactions = Math.round(views * rate);
+
+      return {
+        externalId: `mock_comp_${hash(`${handle}:${index}:id`).toString(36).slice(2, 12)}`,
+        permalink: `https://example.com/${this.platform.toLowerCase()}/${handle.replace(/^@/, "")}/${index}`,
+        text: topic,
+        mediaType,
+        publishedAt: new Date(
+          Date.now() - Math.floor(seed * days) * 86_400_000
+        ),
+        likes: Math.round(interactions * 0.75),
+        comments: Math.round(interactions * 0.15),
+        shares: Math.round(interactions * 0.1),
+        views,
+        metrics: {},
+      };
+    }).filter((post) => post.publishedAt >= since);
+  }
 }
+
+/**
+ * Written to overlap the demo org's subjects only partly. Total overlap would
+ * make gap analysis find nothing; no overlap would make it find everything, and
+ * both are equally useless as a demonstration.
+ */
+const COMPETITOR_TOPICS = [
+  "We rebuilt our onboarding around a single activation metric. Here's the before and after.",
+  "Paid acquisition is getting more expensive. Three channels we moved budget into instead.",
+  "A teardown of five landing pages, and what the highest-converting one does differently.",
+  "Community-led growth is not a channel. It's a cost structure.",
+  "How we run a content calendar with two people and no agency.",
+  "The pricing page experiment that lost us money for six weeks, then made it back.",
+  "Every SaaS metric dashboard we've seen has the same three mistakes.",
+  "Why we stopped writing case studies and started publishing raw numbers.",
+  "Our lifecycle email sequence, annotated, with the open rates.",
+  "Partnerships took nine months to pay off. Here's the timeline we wish we'd had.",
+  "What a good week of customer interviews actually looks like.",
+  "We cut our blog output in half and traffic went up. The reason isn't SEO.",
+];
 
 /**
  * Written to span the range triage has to handle: praise, a real question, a
