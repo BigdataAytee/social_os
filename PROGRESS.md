@@ -1,9 +1,13 @@
 # SocialOS — Build Progress
 
-Tracks phase completion against `ARCHITECTURE.md` §13. Each new Claude Code session should:
+Tracks phase completion against `ARCHITECTURE.md` §13 **and the three addendums**
+(`Platform-Native-Studios.md`, `Growth-Strategist-Engine.md`,
+`Platform-Connections.md`), whose checklist deltas are folded into the phases below.
+Each new Claude Code session should:
 
-1. Read `ARCHITECTURE.md` in full.
-2. Read this file to see what's already done.
+1. Read `ARCHITECTURE.md` in full, then the three addendums.
+2. Read this file to see what's already done — and check it against the code before
+   trusting it. A checkbox is a claim, not evidence.
 3. Work **only** within the next unchecked phase — don't get ahead of the checklist.
 4. Check items off (and note any deviations) before ending the session.
 
@@ -48,7 +52,10 @@ dropped database and completes cleanly. With no Supabase credentials in `.env`,
       Needs approval, Campaigns, Activity, Connected accounts, Notifications, Tasks,
       Trending and Saved ideas — and nothing else. Nothing in `app/(app)/dashboard`
       or `modules/` computes a recommendation. The claim was wrong, not merely
-      generous.
+      generous. Superseded by the delta below.
+- [ ] **"This Week's Strategy" card** (Growth-Strategist-Engine.md §6, §7) — top
+      3–5 recommendations across all platforms, reading `StrategyRecommendation`.
+      Blocked on the engine (Phase 7 delta).
 
 **Done when:** Dashboard numbers/lists visibly change if you edit rows in the seeded DB.
 **Status:** met for everything still checked above — every figure is a service-layer read.
@@ -65,7 +72,13 @@ dropped database and completes cleanly. With no Supabase credentials in `.env`,
 - [ ] **Engagement Predictions** — *corrected 2026-08-06.* Previously checked with a
       status note explaining it was really the Best Posting Times panel. A panel that
       reports what already happened is not a prediction; unchecking rather than
-      re-explaining.
+      re-explaining. Superseded by the two deltas below.
+- [ ] **Native composer: tweet-card stack** (Platform-Native-Studios.md §1, §4) —
+      per-card 280 counter, reorderable, quote-tweet target picker; Thread Builder
+      enforces hook → payoff → close. `platformData` takes the `kind: "thread"` shape.
+- [ ] **Inline engagement-prediction badge** in the schedule modal
+      (Growth-Strategist-Engine.md §3, §7) — band plus reasoning, never a fabricated
+      precise percentage.
 - [x] Templates
 
 **Done when:** every feature above reads/writes real DB rows and every AI feature calls the real orchestrator (§9). This becomes the literal template Phase 3 copies — worth getting right before moving on.
@@ -95,6 +108,14 @@ but "each Studio feels native" is not something the composer currently delivers.
 - [x] Facebook Studio — AI Post Writer, Long-form Content Generator, Community Management, Group Content Planner, Business Page Manager, Event Promotion, Comment Assistant, Messenger Templates, Analytics, Scheduler, Campaign Planner
 - [x] YouTube Studio — Topic Research, Keyword Explorer, Video SEO, AI Script Writer, Title Generator, Description Generator, Thumbnail Ideas, Shorts Generator, Competitor Analysis, Analytics, Trend Explorer
 
+- [ ] **Native composers per Studio** (Platform-Native-Studios.md §1, §4) — TikTok
+      vertical 9:16 storyboard timeline with a trending-sound picker; Instagram
+      slide-deck grid with the cover hook as its own field; Facebook longer-form
+      editor with `discussionPrompt` first-class; YouTube paired title/thumbnail
+      workshop (2–3 concepts side by side, never generated separately) plus chapter
+      markers. Each writes its own `platformData` shape.
+- [ ] **Inline engagement-prediction badge** in every Studio's schedule modal
+
 **Done when:** all 5 Studios are reachable from the switcher, each visually distinct via its accent color, structurally consistent via `StudioShell`.
 **Status:** met — all five consume `StudioShell` unchanged; they differ only by registry
 entry and loaded data. Same caveat as Phase 2: per-platform discovery features
@@ -108,6 +129,10 @@ screens — real per-feature endpoints arrive with real adapters (§10).
 - [x] Global chat panel wired to the orchestrator
 - [x] Tool-calling: `createPost`, `scheduleContent`, `repurposeContent`, `saveIdea`, `listIdeas` map to real service-layer calls (not a separate mock path)
 - [x] "Repurpose this into everything" flow: one input → multi-platform draft bundle → review before saving
+
+- [ ] **Trend Response pipeline** (Platform-Native-Studios.md §2) — `modules/trends/pipeline.ts`,
+      `POST /api/trends/respond`, and the five-draft review screen reusing the
+      repurpose review pattern rather than a second one. Auto-drafts, never auto-publishes.
 
 **Done when:** a single prompt produces real, editable drafts across more than one Studio.
 **Status:** met — verified: one repurpose click created 5 drafts, one per Studio, as
@@ -148,6 +173,13 @@ roles are assigned to existing members.
 - [x] Unified cross-platform analytics dashboard
 - [x] AI performance recommendations
 
+- [ ] **Growth Strategist engine** (Growth-Strategist-Engine.md §5, §7) —
+      `modules/strategy/engine.ts` (best-time + content-type-ranking aggregation),
+      `briefing.ts` (the one LLM synthesis step), `predict.ts` (on-demand, not
+      persisted), `benchmarks.json` cold-start fallback with `confidence: "low"`,
+      and the nightly recompute job. `GET /api/strategy/:platform`,
+      `POST /api/strategy/predict`.
+
 **Done when:** every chart reads from `AnalyticsSnapshot`, none are hardcoded.
 **Status:** met — every chart and tile goes through `modules/analytics/service.ts`. Best
 posting times are derived from engagement on days you actually published, not a generic
@@ -177,6 +209,33 @@ safety net but is no longer the normal path.
 
 ## Session log
 *(append a line here at the end of each session — phase worked on, what shipped, what was deferred)*
+
+- **Addendum retrofit, session 2 — step 1 (schema) only.** The three addendum
+  documents arrived and are now in the repo root. Their checklist deltas are folded
+  into the phases above.
+
+  Shipped: migration `20260806024315_integration_mode_trends_strategy` —
+  `IntegrationMode` (DIRECT | UNIFIED) plus a nullable `integrationMode` on
+  `ConnectedAccount`, `TrendEvent`/`TrendResponse`, and `StrategyRecommendation`,
+  with the two new `Organization` relations. Additive only: the existing org, 29
+  posts, 394 snapshots and 5 connected accounts are untouched. Verified after the
+  migration — typecheck, lint, production build, `npm run smoke` (45/45),
+  `npm run smoke:oauth` (51/51), and the app boots with every route answering.
+
+  **One deviation, deliberate.** `Platform-Connections.md` §3 sketches
+  `PlatformCredential` with separate `accessTokenEnc`/`refreshTokenEnc` columns. That
+  table already existed here from the connected-accounts work, storing one AES-256-GCM
+  envelope over both tokens with its IV and auth tag. It was kept rather than
+  rewritten: GCM needs a unique IV and an authentication tag per encryption, and the
+  §3 sketch has nowhere to put either — dropping the tag would let a tampered row
+  decrypt to plausible garbage that then gets sent to a platform API as a bearer
+  credential. Every requirement §3 actually states is met. Documented in the schema at
+  the model.
+
+  Deferred: steps 2–7, in order, one per session as the brief asks. Step 2 (registry +
+  unified adapter) is next, and note that `modules/integrations/registry.ts` already
+  exists with a `getAdapter(platform)` signature — it needs the `mode` parameter and
+  per-account resolution, not a rewrite.
 
 - **Baseline audit (addendum retrofit, session 1).** Asked to integrate three
   addendum documents — `Platform-Native-Studios.md`, `Growth-Strategist-Engine.md`,
@@ -294,6 +353,23 @@ Not one of the original §13 phases — added after the checklist, on request.
 - [x] Two verification suites: `npm run smoke` (45 checks, service layer against a
       seeded database) and `npm run smoke:oauth` (51 checks, the whole connect flow
       against `scripts/fake-platform.ts`)
+- [x] **Step 1 — schema (Platform-Connections.md §3, Platform-Native-Studios.md §2,
+      Growth-Strategist-Engine.md §4).** `IntegrationMode` enum + nullable
+      `ConnectedAccount.integrationMode`; `TrendEvent`/`TrendResponse`;
+      `StrategyRecommendation`. Migration `20260806024315_integration_mode_trends_strategy`,
+      additive only — the seeded org, its 29 posts, 394 snapshots and 5 accounts all
+      survived it. `PlatformCredential` already existed; kept, with the deviation from
+      §3 documented in the schema (§3's two-column sketch has nowhere to put AES-GCM's
+      IV and auth tag).
+- [ ] **Step 2 — adapter registry + unified adapter** (Platform-Connections.md §4).
+      `getAdapter(platform, mode)`; every service-layer call resolves per account.
+      Unified before any direct adapter.
+- [ ] **Step 3 — connection-type selector** in Settings (Mock / Unified / Direct),
+      Direct shown greyed with a tooltip until that platform's adapter exists.
+- [ ] **Step 4 — native composers** (see Phase 2/3 deltas above)
+- [ ] **Step 5 — engagement-prediction badge** (see Phase 2/3 deltas above)
+- [ ] **Step 6 — Growth Strategist engine** (see Phase 7 delta above)
+- [ ] **Step 7 — Trend Response pipeline** (see Phase 4 delta above)
 - [ ] **Unexercised against the real platform APIs.** The full flow is verified
       end to end against `scripts/fake-platform.ts` (51 checks), but no request
       has been made to X, TikTok, Meta or Google — the build environment has no
