@@ -2,6 +2,7 @@ import {
   BarChart3,
   Calendar,
   FolderOpen,
+  Inbox,
   LayoutDashboard,
   Settings,
   Sparkles,
@@ -36,6 +37,9 @@ export const STUDIO_NAV: NavItem[] = STUDIOS.map((studio) => ({
 }));
 
 export const WORKSPACE_NAV: NavItem[] = [
+  // First in the workspace group on purpose: the inbox is the surface with
+  // other people waiting on the other side of it.
+  { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/calendar", label: "Calendar", icon: Calendar },
   { href: "/assets", label: "Asset Library", icon: FolderOpen },
   { href: "/assistant", label: "AI Assistant", icon: Sparkles },

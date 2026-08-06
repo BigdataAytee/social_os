@@ -17,6 +17,13 @@ export type Action =
   | "asset.upload"
   | "ai.generate"
   | "comment.write"
+  // Replying to the outside world under the brand's name. Deliberately not
+  // `comment.write`, which is an internal note on a draft — a public reply is a
+  // published statement and belongs behind the same kind of gate. A CREATOR is
+  // a contractor: they may write drafts, not speak as the brand.
+  | "inbox.reply"
+  // Assigning, snoozing and closing threads.
+  | "inbox.manage"
   | "campaign.manage"
   | "brandVoice.edit"
   | "member.manage"
@@ -41,6 +48,8 @@ const MATRIX: Record<Role, Action[] | "*"> = {
     "asset.upload",
     "ai.generate",
     "comment.write",
+    "inbox.reply",
+    "inbox.manage",
     "campaign.manage",
     "brandVoice.edit",
     "member.manage",
@@ -55,6 +64,8 @@ const MATRIX: Record<Role, Action[] | "*"> = {
     "asset.upload",
     "ai.generate",
     "comment.write",
+    "inbox.reply",
+    "inbox.manage",
     "workspace.switch",
   ],
   // A contractor: writes and edits, but never pushes work into the approval

@@ -130,6 +130,7 @@ model Organization {
   jobs                    Job[]
   brandProfile            BrandProfile?
   memoryChunks            MemoryChunk[]
+  conversations           Conversation[]
   strategyRecommendations StrategyRecommendation[]
   posts                   Post[]
   campaigns               Campaign[]
@@ -155,12 +156,13 @@ model User {
   avatarUrl String?
   createdAt DateTime @default(now())
 
-  memberships   Membership[]
-  postsAuthored Post[]         @relation("PostAuthor")
-  tasksAssigned Task[]         @relation("TaskAssignee")
-  comments      Comment[]
-  aiGenerations AIGeneration[]
-  activityLogs  ActivityLog[]
+  memberships           Membership[]
+  postsAuthored         Post[]         @relation("PostAuthor")
+  tasksAssigned         Task[]         @relation("TaskAssignee")
+  conversationsAssigned Conversation[] @relation("ConversationAssignee")
+  comments              Comment[]
+  aiGenerations         AIGeneration[]
+  activityLogs          ActivityLog[]
 
   @@map("users")
 }
@@ -205,6 +207,7 @@ model ConnectedAccount {
   snapshots     AnalyticsSnapshot[]
   credential    PlatformCredential?
   externalPosts ExternalPost[]
+  conversations Conversation[]
 
   @@unique([orgId, platform, handle])
   @@index([orgId])
@@ -426,6 +429,97 @@ model MemoryChunk {
   @@unique([orgId, sourceType, sourceId])
   @@index([orgId, sourceType])
   @@map("memory_chunks")
+}
+
+// ==================== UNIFIED ENGAGEMENT INBOX ====================
+// OS-ARCHITECTURE.md §11 stage 5. Comments, mentions and DMs from every
+// platform in one queue, because a social media manager's day is spent in five
+// browser tabs and the tabs are the product problem.
+
+/// A comment thread, a mention, or a DM — the same object, because triage
+/// treats them identically. What differs is only where the reply goes, and that
+/// is the adapter's problem.
+enum ConversationKind {
+  COMMENT
+  MENTION
+  DM
+}
+
+enum ConversationStatus {
+  OPEN
+  SNOOZED
+  DONE
+}
+
+/// Coarse on purpose. A five-point scale invites arguing about whether
+/// something is a 2 or a 3; three buckets are what triage actually uses.
+enum Sentiment {
+  POSITIVE
+  NEUTRAL
+  NEGATIVE
+}
+
+model Conversation {
+  id            String             @id @default(cuid())
+  orgId         String
+  accountId     String
+  platform      Platform
+  kind          ConversationKind
+  /// The platform's id for the thread this belongs to — a post id for comments,
+  /// a conversation id for DMs. Unique per account, and what makes a re-sync an
+  /// update rather than a duplicate.
+  externalId    String
+  /// The person on the other side, as the platform names them.
+  authorHandle  String
+  authorName    String?
+  permalink     String?
+  status        ConversationStatus @default(OPEN)
+  /// Who on the team owns this. Null means nobody has picked it up.
+  assigneeId    String?
+  sentiment     Sentiment          @default(NEUTRAL)
+  /// 0–100, derived rather than entered. See modules/inbox/triage.ts for what
+  /// feeds it and why each factor is there.
+  priority      Int                @default(0)
+  /// Set when status is SNOOZED — the moment it should come back.
+  snoozeUntil   DateTime?
+  /// Denormalised so the list can sort without joining every message.
+  lastMessageAt DateTime
+  /// Inbound messages nobody has read. Reset when the thread is opened.
+  unread        Int                @default(0)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  org      Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  account  ConnectedAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  assignee User?            @relation("ConversationAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  messages InboxMessage[]
+
+  @@unique([accountId, externalId])
+  @@index([orgId, status, lastMessageAt])
+  @@index([orgId, assigneeId])
+  @@map("conversations")
+}
+
+model InboxMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  /// The platform's id. Null for a reply we sent that the platform hasn't
+  /// acknowledged with one yet.
+  externalId     String?
+  /// True for anything we sent. The only field triage actually branches on.
+  outbound       Boolean  @default(false)
+  authorHandle   String
+  text           String
+  /// Who sent it, when it was us. Null for inbound, and for replies sent by an
+  /// automation rather than a person.
+  sentById       String?
+  sentAt         DateTime
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, externalId])
+  @@index([conversationId, sentAt])
+  @@map("inbox_messages")
 }
 
 // ======================= BACKGROUND WORK =======================

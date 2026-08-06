@@ -157,6 +157,57 @@ export async function enqueueStaleSyncs(
 }
 
 /**
+ * Queue an inbox pull for every connected account.
+ *
+ * A much tighter cadence than `enqueueStaleSyncs` — fifteen minutes rather than
+ * six hours — because the cost of a stale analytics number is a slightly wrong
+ * chart, and the cost of a stale inbox is a customer who was ignored.
+ *
+ * MOCK accounts are included on purpose: a demo org with no real connection
+ * should still have an inbox with something in it, and the mock adapter derives
+ * its items from that org's own posts.
+ */
+export async function enqueueInboxSyncs(
+  everyMinutes = 15
+): Promise<{ queued: number }> {
+  const accounts = await db.connectedAccount.findMany({
+    where: { status: { in: ["CONNECTED", "MOCK"] } },
+    select: { id: true, orgId: true },
+    take: 500,
+  });
+
+  // Bucketed to the cadence, so however often the cron fires, an account is
+  // pulled at most once per window.
+  const bucket = Math.floor(Date.now() / (everyMinutes * 60_000));
+
+  for (const account of accounts) {
+    await enqueue({
+      orgId: account.orgId,
+      kind: "sync-inbox",
+      payload: { accountId: account.id },
+      idempotencyKey: `inbox:${account.id}:${bucket}`,
+      maxAttempts: 3,
+    });
+  }
+
+  // One org's id is enough for a job that isn't org-scoped; it needs *an* org to
+  // satisfy the foreign key, and the work it does is global. Skipped entirely
+  // when there are no accounts, rather than inventing a row to hang it off.
+  const anyOrg = accounts[0]?.orgId;
+  if (anyOrg) {
+    await enqueue({
+      orgId: anyOrg,
+      kind: "wake-snoozed",
+      payload: {},
+      idempotencyKey: `wake:${bucket}`,
+      maxAttempts: 2,
+    });
+  }
+
+  return { queued: accounts.length };
+}
+
+/**
  * Nightly relearn: rebuild every active org's measured voice and search index.
  *
  * "Active" means it has content — an org that has never published has nothing

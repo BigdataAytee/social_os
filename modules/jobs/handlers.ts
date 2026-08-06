@@ -125,6 +125,35 @@ const rebuildBrandProfileJob: JobHandler = async (job) => {
   };
 };
 
+/**
+ * Pull one account's comments, mentions and DMs.
+ *
+ * Separate from `sync-account` rather than folded into it: the inbox wants a
+ * far tighter cadence than analytics — a complaint sitting unseen for six hours
+ * is the failure the inbox exists to prevent — and an inbox pull failing must
+ * not lose the analytics pull that would have run beside it.
+ */
+const syncInboxJob: JobHandler = async (job) => {
+  const accountId = String((job.payload as { accountId?: string }).accountId ?? "");
+  if (!accountId) throw new Error("sync-inbox job has no accountId");
+
+  const session = await systemSession(job.orgId);
+  const { syncInbox } = await import("@/modules/inbox/service");
+  const result = await syncInbox(session, accountId);
+
+  if (result.unsupported) return { summary: `not supported: ${result.unsupported}` };
+  return {
+    summary: `${result.conversations} conversations, ${result.messages} messages`,
+  };
+};
+
+/** Return snoozed threads whose time has come. Org-independent, runs once. */
+const wakeSnoozedJob: JobHandler = async () => {
+  const { wakeSnoozed } = await import("@/modules/inbox/service");
+  const { woken } = await wakeSnoozed();
+  return { summary: `woke ${woken} conversations` };
+};
+
 /** Rebuild the retrieval corpus. */
 const reindexMemoryJob: JobHandler = async (job) => {
   const { reindexOrg } = await import("@/modules/memory/service");
@@ -138,6 +167,8 @@ export const HANDLERS: Record<string, JobHandler> = {
   "recompute-strategy": recomputeStrategyJob,
   "rebuild-brand-profile": rebuildBrandProfileJob,
   "reindex-memory": reindexMemoryJob,
+  "sync-inbox": syncInboxJob,
+  "wake-snoozed": wakeSnoozedJob,
 };
 
 export function handlerFor(kind: string): JobHandler | null {

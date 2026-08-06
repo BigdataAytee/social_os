@@ -3,8 +3,10 @@ import { Platform, type Post } from "@prisma/client";
 import { db } from "@/lib/db";
 import type {
   ExternalPostData,
+  InboxItemData,
   PlatformAdapter,
   PublishResult,
+  ReplyResult,
   Snapshot,
   Trend,
 } from "./types";
@@ -196,4 +198,106 @@ export class MockAdapter implements PlatformAdapter {
         };
       });
   }
+
+  /**
+   * Comments and mentions hanging off the org's own published posts.
+   *
+   * Same principle as `fetchPosts`: derived from content that actually exists
+   * rather than invented, so the inbox in a demo org is about the posts in that
+   * demo org. Deterministic per post, so two syncs agree and the dedupe path in
+   * `ingest` is exercised rather than papered over by fresh random ids.
+   *
+   * The mix is deliberately not all-positive. An inbox where nothing is ever
+   * negative can't demonstrate triage, and triage is the feature.
+   */
+  async fetchInbox(accountId: string, since: Date): Promise<InboxItemData[]> {
+    const account = await db.connectedAccount.findUnique({
+      where: { id: accountId },
+      select: { orgId: true, handle: true },
+    });
+    if (!account) return [];
+
+    const posts = await db.post.findMany({
+      where: {
+        orgId: account.orgId,
+        platform: this.platform,
+        status: "PUBLISHED",
+        publishedAt: { gte: since },
+      },
+      orderBy: { publishedAt: "desc" },
+      take: 20,
+    });
+
+    const items: InboxItemData[] = [];
+
+    for (const post of posts) {
+      if (!post.publishedAt) continue;
+      const seed = hash(`inbox:${this.platform}:${post.id}`);
+      // Zero to three per post: some posts get nothing, which is what makes the
+      // inbox look like an inbox rather than a uniform grid.
+      const count = Math.floor(seed * 4);
+
+      for (let i = 0; i < count; i++) {
+        const itemSeed = hash(`inbox:${post.id}:${i}`);
+        const template = COMMENT_TEMPLATES[
+          Math.floor(itemSeed * COMMENT_TEMPLATES.length)
+        ]!;
+        items.push({
+          threadId: `mock_thread_${post.id.slice(-10)}_${i}`,
+          messageId: `mock_msg_${post.id.slice(-10)}_${i}`,
+          kind: itemSeed > 0.85 ? "DM" : itemSeed > 0.7 ? "MENTION" : "COMMENT",
+          authorHandle: `@${HANDLES[Math.floor(itemSeed * HANDLES.length)]}`,
+          authorName: null,
+          text: template,
+          // Spread through the hours after the post went out.
+          sentAt: new Date(
+            post.publishedAt.getTime() + (1 + i) * 3_600_000 * (1 + itemSeed * 5)
+          ),
+          permalink: `https://example.com/${this.platform.toLowerCase()}/${post.id.slice(-12)}#c${i}`,
+          externalPostId: `mock_${post.id.slice(-12)}`,
+        });
+      }
+    }
+
+    return items.filter((item) => item.sentAt >= since);
+  }
+
+  async replyTo(
+    accountId: string,
+    threadId: string,
+    text: string
+  ): Promise<ReplyResult> {
+    if (!text.trim()) return { ok: false, error: "A reply can't be empty" };
+    return { ok: true, externalId: `mock_reply_${hash(threadId + text).toString(36).slice(2, 12)}` };
+  }
 }
+
+/**
+ * Written to span the range triage has to handle: praise, a real question, a
+ * complaint, a lead, and spam. A demo inbox of five variations on "great post!"
+ * would make the sentiment and priority columns look like they work when they
+ * had nothing to distinguish.
+ */
+const COMMENT_TEMPLATES = [
+  "This is genuinely useful, thanks for writing it up.",
+  "Wait, how does this work if the team is remote?",
+  "Disagree — we tried this and it made retention worse, not better.",
+  "Do you offer this as a service? Would like to talk about pricing.",
+  "Saved. Sending this to my whole team.",
+  "This didn't work for us at all. Really disappointed, we wasted a quarter on it.",
+  "What tool are you using for the charts?",
+  "🔥🔥🔥",
+  "Third time I've asked and still no reply. Is anyone actually reading these?",
+  "Great breakdown. Any chance of a follow-up on the measurement side?",
+];
+
+const HANDLES = [
+  "priya_builds",
+  "marcus.ops",
+  "the_growth_desk",
+  "jenna_writes",
+  "devon_r",
+  "smallteamcmo",
+  "kofi_analytics",
+  "rowan.media",
+];

@@ -3,10 +3,13 @@ import { Platform, type Post } from "@prisma/client";
 import { db } from "@/lib/db";
 import { MockAdapter } from "./mock-adapter";
 import { withAccessToken } from "./oauth/service";
+import { InboxUnsupportedError } from "./types";
 import type {
   ExternalPostData,
+  InboxItemData,
   PlatformAdapter,
   PublishResult,
+  ReplyResult,
   Snapshot,
   Trend,
 } from "./types";
@@ -155,6 +158,174 @@ export class LiveAdapter implements PlatformAdapter {
       this.followerCount(token, externalId)
     );
     return snapshotsFromPosts(posts, followers);
+  }
+
+  /**
+   * Three of the five, honestly.
+   *
+   * X mentions are covered by `tweet.read`, and Meta comments by
+   * `pages_read_engagement` — scopes this app already requests and a reviewer
+   * has already granted. TikTok's comment API is not in `video.list`, and
+   * YouTube's `commentThreads` needs a scope the connect flow doesn't ask for.
+   *
+   * Those two throw rather than returning empty, and the distinction is the
+   * point: an empty array would show a working, quiet inbox for an account
+   * whose comments are simply not being read. The sync layer records the reason
+   * against the account so the person can see it.
+   */
+  async fetchInbox(accountId: string, since: Date): Promise<InboxItemData[]> {
+    if (this.platform === Platform.TIKTOK) {
+      throw new InboxUnsupportedError(
+        "TikTok's comment API isn't covered by the video.list scope this app requests."
+      );
+    }
+    if (this.platform === Platform.YOUTUBE) {
+      throw new InboxUnsupportedError(
+        "Reading YouTube comments needs the youtube.force-ssl scope, which this connect flow doesn't request."
+      );
+    }
+
+    return withAccessToken(accountId, async (token, externalId) => {
+      switch (this.platform) {
+        case Platform.X:
+          return this.xMentions(token, externalId, since);
+        case Platform.FACEBOOK:
+        case Platform.INSTAGRAM:
+          return this.metaComments(token, accountId, since);
+        default:
+          return [];
+      }
+    });
+  }
+
+  /**
+   * Always refused, and refused clearly.
+   *
+   * Every scope in `oauth/providers.ts` is read-only. A reply attempt would come
+   * back from the platform as a permissions error after the person had already
+   * written and sent it; saying so before they type is the difference between a
+   * limitation and a bug.
+   */
+  async replyTo(): Promise<ReplyResult> {
+    return {
+      ok: false,
+      error:
+        "This connection is read-only. Replying needs write scopes and platform review — switch this account to a Unified connection, or reply on the platform.",
+    };
+  }
+
+  private async xMentions(
+    token: string,
+    userId: string,
+    since: Date
+  ): Promise<InboxItemData[]> {
+    const url = new URL(`${apiBase(Platform.X)}/users/${userId}/mentions`);
+    url.searchParams.set("max_results", "100");
+    url.searchParams.set("start_time", since.toISOString());
+    url.searchParams.set("tweet.fields", "created_at,text,conversation_id,author_id");
+    url.searchParams.set("expansions", "author_id");
+    url.searchParams.set("user.fields", "username,name");
+
+    const body = await apiGet<{
+      data?: {
+        id: string;
+        text: string;
+        created_at: string;
+        conversation_id?: string;
+        author_id?: string;
+      }[];
+      includes?: { users?: { id: string; username: string; name?: string }[] };
+    }>(url.toString(), token);
+
+    const users = new Map(
+      (body.includes?.users ?? []).map((user) => [user.id, user])
+    );
+
+    return (body.data ?? []).map((tweet) => {
+      const author = tweet.author_id ? users.get(tweet.author_id) : undefined;
+      return {
+        // conversation_id groups a reply chain; falling back to the tweet id
+        // makes a standalone mention its own thread, which is what it is.
+        threadId: tweet.conversation_id ?? tweet.id,
+        messageId: tweet.id,
+        kind: "MENTION" as const,
+        authorHandle: author ? `@${author.username}` : "@unknown",
+        authorName: author?.name ?? null,
+        text: tweet.text,
+        sentAt: new Date(tweet.created_at),
+        permalink: author
+          ? `https://x.com/${author.username}/status/${tweet.id}`
+          : null,
+        externalPostId: null,
+      };
+    });
+  }
+
+  /**
+   * Comments on our own recent posts.
+   *
+   * Meta has no "all comments across the account" endpoint — comments hang off
+   * media. So this walks the posts we already know about, which also bounds the
+   * work: `fetchPosts` is windowed by `since`, and this inherits that window.
+   */
+  private async metaComments(
+    token: string,
+    accountId: string,
+    since: Date
+  ): Promise<InboxItemData[]> {
+    const posts = await db.externalPost.findMany({
+      where: { accountId, publishedAt: { gte: since } },
+      select: { externalId: true, permalink: true },
+      orderBy: { publishedAt: "desc" },
+      // A page's worth. Every id here is one more API call, and a sync that
+      // fans out to two hundred requests will be rate-limited into failing.
+      take: 25,
+    });
+
+    const items: InboxItemData[] = [];
+
+    for (const post of posts) {
+      const url = new URL(`${apiBase(this.platform)}/${post.externalId}/comments`);
+      url.searchParams.set("fields", "id,message,created_time,from{id,name,username}");
+      url.searchParams.set("limit", "50");
+
+      try {
+        const body = await apiGet<{
+          data?: {
+            id: string;
+            message?: string;
+            created_time: string;
+            from?: { id: string; name?: string; username?: string };
+          }[];
+        }>(url.toString(), token);
+
+        for (const comment of body.data ?? []) {
+          if (!comment.message) continue;
+          const sentAt = new Date(comment.created_time);
+          if (sentAt < since) continue;
+          items.push({
+            threadId: comment.id,
+            messageId: comment.id,
+            kind: "COMMENT",
+            authorHandle: comment.from?.username
+              ? `@${comment.from.username}`
+              : (comment.from?.name ?? "Someone"),
+            authorName: comment.from?.name ?? null,
+            text: comment.message,
+            sentAt,
+            permalink: post.permalink,
+            externalPostId: post.externalId,
+          });
+        }
+      } catch (error) {
+        // One post's comments failing must not lose the other twenty-four.
+        // Meta returns 400 for media that simply can't have comments, which is
+        // a fact about that post rather than a failure of the sync.
+        if (error instanceof Error && error.message.includes("429")) throw error;
+      }
+    }
+
+    return items;
   }
 
   // ------------------------------------------------------------------- X

@@ -3,8 +3,10 @@ import { Platform, type Post } from "@prisma/client";
 import { MockAdapter } from "../mock-adapter";
 import type {
   ExternalPostData,
+  InboxItemData,
   PlatformAdapter,
   PublishResult,
+  ReplyResult,
   Snapshot,
   Trend,
 } from "../types";
@@ -37,6 +39,18 @@ type ProviderPost = {
   postUrl?: string;
   mediaUrls?: string[];
   isVideo?: boolean;
+};
+
+type ProviderComment = {
+  id: string;
+  text?: string;
+  created?: string;
+  /** The thread to reply into, where the provider distinguishes it. */
+  threadId?: string;
+  postId?: string;
+  type?: string;
+  url?: string;
+  from?: { username?: string; name?: string };
 };
 
 type ProviderAnalytics = {
@@ -224,6 +238,81 @@ export class UnifiedAdapter implements PlatformAdapter {
     return [...byDay.values()].sort(
       (a, b) => a.date.getTime() - b.date.getTime()
     );
+  }
+
+  /**
+   * Comments and DMs through the provider's own inbox endpoint.
+   *
+   * This is the mode where an inbox can actually be two-way: the provider holds
+   * write approval on every network, which is the whole reason to be on it.
+   * Direct connections can read three networks and reply to none.
+   */
+  async fetchInbox(accountId: string, since: Date): Promise<InboxItemData[]> {
+    const network = networkName(this.platform);
+
+    const body = await unifiedRequest<{ comments?: ProviderComment[] } | ProviderComment[]>({
+      path: "/comments",
+      accountId,
+      query: { platform: network, lastRecords: 100 },
+    });
+
+    const comments = Array.isArray(body) ? body : (body.comments ?? []);
+
+    return comments
+      .filter((comment) => {
+        if (!comment.created || !comment.text) return false;
+        return new Date(comment.created) >= since;
+      })
+      .map((comment) => ({
+        threadId: comment.threadId ?? comment.postId ?? comment.id,
+        messageId: comment.id,
+        kind: comment.type === "dm" ? ("DM" as const) : ("COMMENT" as const),
+        authorHandle: comment.from?.username
+          ? `@${comment.from.username}`
+          : (comment.from?.name ?? "Someone"),
+        authorName: comment.from?.name ?? null,
+        text: comment.text!,
+        sentAt: new Date(comment.created!),
+        permalink: comment.url ?? null,
+        externalPostId: comment.postId ?? null,
+      }));
+  }
+
+  async replyTo(
+    accountId: string,
+    threadId: string,
+    text: string
+  ): Promise<ReplyResult> {
+    try {
+      const body = await unifiedRequest<{
+        id?: string;
+        errors?: { message: string }[];
+      }>({
+        path: "/comments",
+        method: "POST",
+        accountId,
+        body: {
+          platform: networkName(this.platform),
+          commentId: threadId,
+          comment: text,
+        },
+      });
+
+      if (body.errors?.length || !body.id) {
+        return {
+          ok: false,
+          error: body.errors?.[0]?.message ?? "The provider accepted nothing.",
+        };
+      }
+      return { ok: true, externalId: body.id };
+    } catch (error) {
+      // Same contract as publish: a refusal is a result, not a throw, so the
+      // person sees why their reply didn't send instead of an error page.
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : "Reply failed.",
+      };
+    }
   }
 
   private async followerCount(accountId: string): Promise<number> {
