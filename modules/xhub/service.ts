@@ -89,7 +89,7 @@ export async function ingest(
 }
 
 /** Upsert posts, keyed on (org, externalId). Returns how many are now stored. */
-async function storePosts(
+export async function storePosts(
   orgId: string,
   posts: XPostData[]
 ): Promise<number> {

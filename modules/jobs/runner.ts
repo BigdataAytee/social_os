@@ -292,6 +292,34 @@ export async function enqueueListening(): Promise<{
 }
 
 /**
+ * Queue an X Hub harvest for every org with an X account.
+ *
+ * Hourly rather than per-minute: it reads rows the account sync, the inbox and
+ * competitor tracking just wrote, and asking more often than they run would be
+ * putting the same question to unchanged data.
+ */
+export async function enqueueHarvest(): Promise<{ queued: number }> {
+  const orgs = await db.organization.findMany({
+    where: { connectedAccounts: { some: { platform: Platform.X } } },
+    select: { id: true },
+    take: 500,
+  });
+
+  const hour = new Date().toISOString().slice(0, 13);
+  for (const org of orgs) {
+    await enqueue({
+      orgId: org.id,
+      kind: "harvest-xhub",
+      payload: {},
+      idempotencyKey: `harvest:${org.id}:${hour}`,
+      maxAttempts: 2,
+    });
+  }
+
+  return { queued: orgs.length };
+}
+
+/**
  * Nightly relearn: rebuild every active org's measured voice and search index.
  *
  * "Active" means it has content — an org that has never published has nothing

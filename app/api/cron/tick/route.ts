@@ -4,6 +4,7 @@ import { cronAuthorized } from "@/lib/cron-auth";
 import {
   drain,
   enqueueDuePosts,
+  enqueueHarvest,
   enqueueInboxSyncs,
   enqueueListening,
   enqueueRelearn,
@@ -59,6 +60,7 @@ export async function GET(request: NextRequest) {
     ["strategy", enqueueStrategyRecompute],
     ["relearn", enqueueRelearn],
     ["listening", enqueueListening],
+    ["harvest", enqueueHarvest],
   ];
 
   for (const [name, step] of steps) {

@@ -7,6 +7,7 @@ import { requireSession } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { generate } from "@/modules/ai/orchestrator";
 import { createPost } from "@/modules/posts/service";
+import { harvest } from "@/modules/xhub/harvest";
 import { ingest, listStories, setSaved } from "@/modules/xhub/service";
 import {
   buildGist,
@@ -197,5 +198,25 @@ export async function deriveTrendsAction(): Promise<
   return toActionResult(async () => {
     const session = await requireSession();
     return deriveTrends(session);
+  });
+}
+
+
+/**
+ * Pull from the connected X account.
+ *
+ * Reads what the account sync, the engagement inbox and competitor tracking
+ * have already stored, so it costs no new API calls — and only reaches out for
+ * replies to your own top posts, where there is a real tweet id to ask about.
+ */
+export async function harvestAction(): Promise<
+  ActionResult<Awaited<ReturnType<typeof harvest>>>
+> {
+  return toActionResult(async () => {
+    const session = await requireSession();
+    const result = await harvest(session);
+    revalidatePath("/hub");
+    revalidatePath("/studio/x");
+    return result;
   });
 }

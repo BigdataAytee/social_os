@@ -184,6 +184,23 @@ const scanMonitorsJob: JobHandler = async (job) => {
   };
 };
 
+/**
+ * Fill the X Hub from the connected account.
+ *
+ * On the schedule rather than only on a button, because the whole point of the
+ * change was that the hub shouldn't wait to be fed. Runs after the account sync
+ * and the inbox pull in the same drain, so it sees what they just stored.
+ */
+const harvestXHubJob: JobHandler = async (job) => {
+  const session = await systemSession(job.orgId);
+  const { harvest } = await import("@/modules/xhub/harvest");
+  const result = await harvest(session);
+  if (result.note) return { summary: result.note };
+  return {
+    summary: `${result.own} own, ${result.mentions} mentions, ${result.rivals} rivals, ${result.stories} stories`,
+  };
+};
+
 /** Rebuild the retrieval corpus. */
 const reindexMemoryJob: JobHandler = async (job) => {
   const { reindexOrg } = await import("@/modules/memory/service");
@@ -201,6 +218,7 @@ export const HANDLERS: Record<string, JobHandler> = {
   "wake-snoozed": wakeSnoozedJob,
   "sync-competitor": syncCompetitorJob,
   "scan-monitors": scanMonitorsJob,
+  "harvest-xhub": harvestXHubJob,
 };
 
 export function handlerFor(kind: string): JobHandler | null {

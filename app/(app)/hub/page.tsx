@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { XStoryKind } from "@prisma/client";
 
 import { HubTabs } from "@/components/hub/hub-tabs";
+import { SuggestionsPanel } from "@/components/hub/suggestions-panel";
 import { PageHeader } from "@/components/shell/page-placeholder";
 import { Badge } from "@/components/ui/badge";
 import { can } from "@/lib/auth/permissions";
@@ -15,6 +16,7 @@ import {
   listVideos,
   visibleTopics,
 } from "@/modules/xhub/stories";
+import { suggestions } from "@/modules/xhub/suggestions";
 
 export const metadata: Metadata = { title: "X Hub · SocialOS" };
 export const dynamic = "force-dynamic";
@@ -29,7 +31,18 @@ export const dynamic = "force-dynamic";
 export default async function HubPage() {
   const session = await requireSession();
 
-  const [savage, news, gists, trendStories, videos, creators, trends, stats, saved] =
+  const [
+    savage,
+    news,
+    gists,
+    trendStories,
+    videos,
+    creators,
+    trends,
+    stats,
+    saved,
+    hubSuggestions,
+  ] =
     await Promise.all([
       listStories(session, { kind: XStoryKind.SAVAGE }),
       listStories(session, { kind: XStoryKind.NEWS }),
@@ -40,6 +53,7 @@ export default async function HubPage() {
       deriveTrends(session),
       hubAnalytics(session),
       listStories(session, { saved: true }),
+      suggestions(session),
     ]);
 
   const serialise = (feed: Awaited<ReturnType<typeof listStories>>) =>
@@ -68,6 +82,11 @@ export default async function HubPage() {
             <Badge variant="accent">{stats.posts} posts</Badge>
           </div>
         }
+      />
+
+      <SuggestionsPanel
+        suggestions={hubSuggestions}
+        canHarvest={can(session.role, "idea.write")}
       />
 
       <HubTabs

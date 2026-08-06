@@ -28,6 +28,9 @@ import {
   listVideos,
   visibleTopics,
 } from "@/modules/xhub/stories";
+import { triage } from "@/modules/inbox/triage";
+import { harvest } from "@/modules/xhub/harvest";
+import { suggestions } from "@/modules/xhub/suggestions";
 import { DELETED_ID, IDS, startFakeSyndication } from "./fake-syndication";
 
 let failures = 0;
@@ -411,6 +414,133 @@ async function main() {
   ok("sees no videos", (await listVideos(outsider)).length === 0);
   ok("no creators", (await listCreators(outsider)).length === 0);
   ok("and empty analytics", (await hubAnalytics(outsider)).posts === 0);
+
+  console.log("\nHarvest — the hub feeds itself from the connected account");
+  const account = await db.connectedAccount.findFirst({
+    where: { orgId: session.orgId, platform: "X" },
+  });
+  if (!account) throw new Error("Seed a connected X account first");
+
+  // Real-shaped rows in the three places harvest reads from. The ids are
+  // deliberately non-mock for the own posts, so the hydration path is exercised
+  // rather than skipped.
+  const HARVEST_TAG = `${IDS.original}`;
+  await db.externalPost.upsert({
+    where: {
+      accountId_externalId: { accountId: account.id, externalId: HARVEST_TAG },
+    },
+    update: {},
+    create: {
+      orgId: session.orgId,
+      accountId: account.id,
+      externalId: HARVEST_TAG,
+      text: "Our own post about retention that people replied to.",
+      mediaType: "text",
+      publishedAt: new Date(Date.now() - 2 * 86_400_000),
+      likes: 900,
+      comments: 40,
+      shares: 60,
+      views: 20_000,
+    },
+  });
+
+  const conv = await db.conversation.create({
+    data: {
+      orgId: session.orgId,
+      accountId: account.id,
+      platform: "X",
+      kind: "MENTION",
+      externalId: `harvest-conv-${Date.now()}`,
+      authorHandle: "@asker",
+      // What triage actually assigns a question from a stranger — base 30 plus
+      // 15 for asking one, plus the mention bump. Creating the row with the
+      // default 0 would be a fixture the inbox could never produce, and the
+      // suggestion that reads it would look broken for the wrong reason.
+      priority: triage({ text: "Genuine question — how do you measure this?", kind: "MENTION" }).priority,
+      lastMessageAt: new Date(),
+      messages: {
+        create: {
+          externalId: `harvest-msg-${Date.now()}`,
+          outbound: false,
+          authorHandle: "@asker",
+          text: "Genuine question — how do you measure this?",
+          sentAt: new Date(),
+        },
+      },
+    },
+  });
+
+  await db.xStory.deleteMany({ where: { orgId: session.orgId } });
+  await db.xPost.deleteMany({ where: { orgId: session.orgId } });
+
+  const harvested = await harvest(session);
+  ok("your own posts come across", harvested.own > 0, `${harvested.own}`);
+  ok("so do mentions", harvested.mentions > 0, `${harvested.mentions}`);
+  ok(
+    "and it says nothing was wrong when something was found",
+    harvested.note === null
+  );
+  ok(
+    "replies to your own posts are hydrated",
+    harvested.hydrated > 0,
+    `${harvested.hydrated}`
+  );
+  ok("stories are built without anyone pasting a link", harvested.stories > 0,
+    `${harvested.stories}`);
+  ok(
+    "and the corpus is populated",
+    (await db.xPost.count({ where: { orgId: session.orgId } })) > 0
+  );
+
+  // The bound that keeps a helpful pull from becoming a crawl.
+  const before = fake.requested.length;
+  await harvest(session);
+  ok(
+    "a second harvest stays bounded — five own posts at most, never the archive",
+    fake.requested.length - before <= 5,
+    `${fake.requested.length - before} requests`
+  );
+
+  const noAccount = await db.organization.create({
+    data: { name: `noacct-${Date.now()}`, slug: `noacct-${Date.now()}` },
+  });
+  const noAccountResult = await harvest({ ...session, orgId: noAccount.id });
+  ok(
+    "an org with no X account is told so rather than shown an empty hub",
+    (noAccountResult.note ?? "").includes("No X account connected")
+  );
+
+  console.log("\nSuggestions — the hub speaks first");
+  const suggested = await suggestions(session);
+  ok("suggestions come back", suggested.length > 0, `${suggested.length}`);
+  ok(
+    "each carries evidence, not just an instruction",
+    suggested.every((s) => s.why.length > 20)
+  );
+  ok(
+    "ordered by urgency",
+    suggested.every((s, i) => i === 0 || suggested[i - 1]!.urgency >= s.urgency)
+  );
+  ok("each links somewhere it can be acted on", suggested.every((s) => s.href.startsWith("/")));
+  ok(
+    "urgency stays inside 0–100",
+    suggested.every((s) => s.urgency >= 0 && s.urgency <= 100)
+  );
+  ok(
+    "an open mention becomes a reply suggestion",
+    suggested.some((s) => s.kind === "reply"),
+    suggested.map((s) => s.kind).join(", ")
+  );
+  ok(
+    "an org with nothing gets no suggestions rather than invented ones",
+    (await suggestions({ ...session, orgId: noAccount.id })).length === 0
+  );
+
+  await db.conversation.delete({ where: { id: conv.id } });
+  await db.externalPost.deleteMany({
+    where: { accountId: account.id, externalId: HARVEST_TAG },
+  });
+  await db.organization.delete({ where: { id: noAccount.id } });
 
   console.log("\nCleanup");
   await db.xStory.deleteMany({ where: { orgId: session.orgId } });

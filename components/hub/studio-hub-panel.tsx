@@ -4,6 +4,10 @@ import Link from "next/link";
 import { ArrowRight, Flame, TrendingUp } from "lucide-react";
 
 import { HubBoard, type StoryCardData } from "@/components/hub/hub-board";
+import {
+  SuggestionsPanel,
+  type SuggestionRow,
+} from "@/components/hub/suggestions-panel";
 import { Badge } from "@/components/ui/badge";
 
 /**
@@ -22,6 +26,7 @@ import { Badge } from "@/components/ui/badge";
 
 export type StudioHubData = {
   stories: StoryCardData[];
+  suggestions: SuggestionRow[];
   trends: { topic: string; posts: number; reach: number }[];
   canAct: boolean;
   canGenerate: boolean;
@@ -31,6 +36,13 @@ export type StudioHubData = {
 export function StudioHubPanel({ hub }: { hub: StudioHubData }) {
   return (
     <div className="flex flex-col gap-4">
+      {/*
+        The suggestions come first here too. In the Studio they matter more,
+        not less: this is the screen where someone is deciding what to write,
+        and "here is what to write about, and why" is the whole answer.
+      */}
+      <SuggestionsPanel suggestions={hub.suggestions} canHarvest={hub.canAct} />
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Flame className="h-4 w-4 text-accent" aria-hidden />
